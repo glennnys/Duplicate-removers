@@ -1,0 +1,1 @@
+Duplicate photo remover and google photo metadata extraction tool.
