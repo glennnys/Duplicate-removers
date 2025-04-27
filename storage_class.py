@@ -4,12 +4,9 @@ from PIL import Image
 import imagehash
 import metadata_extractor as pe
 import os
-import hashlib
-import json
 from collections import namedtuple
 import random
 import pickle
-import io
 import math
 from pathlib import Path
 
@@ -20,10 +17,10 @@ class HashStorage:
         self.threshold = threshold
         self.extract_meta = extract_meta
 
-        self.og_path = "og"
-        self.new_dest = "new"
-        self.dupe_dest = "duplicate"
-        self.err_dest = "error"
+        self.og_path = ""
+        self.new_dest = ""
+        self.dupe_dest = ""
+        self.err_dest = ""
         self.json_files = []
         self.lock1 = threading.Lock()
         self.lock2 = threading.Lock()

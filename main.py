@@ -16,8 +16,6 @@ import storage_class as fs
 import platform
 
 pillow_heif.register_heif_opener()
-cache_file = "image_hash_cache.json"
-bucket_prefix_length = 4
 
 ################################## Helper functions ##################################
 def copy_file(file_path, dest_folder):
@@ -662,8 +660,7 @@ def start_process():
 info_frame = Frame(window)
 info_frame.pack(pady=20)
 
-info_label = Label(info_frame, text="""Enabling threading will increase speed drastically but will consume more computer resources. Also increases the chance of problems occuring (low chance still).
-                   \n Putting the threshold on 1 uses a different algorithm that is substantially faster.
+info_label = Label(info_frame, text="""Enabling threading will increase speed drastically but will consume all computer resources.
                    \n Enabling metadata extraction searches for json files corresponding to each file containing metadata. Another significant slowdown""", font=small_font, foreground='cyan')
 info_label.pack(fill=X, expand=True)
 
