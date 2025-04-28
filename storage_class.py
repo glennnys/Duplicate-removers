@@ -105,13 +105,17 @@ class HashStorage:
 
     ### This function is used to calculate the similarity between two hashes
     def hamming_distance(self, h1, h2):
+        if h1 is None or h2 is None:
+            return self.phash_res**2 
+        
         if type(h1) == list and type(h2) == list:
             if len(h1) == 0 or len(h2) == 0:
                 return self.phash_res**2
+            
             sum = 0
             for i in range(min(len(h1), len(h2))):
                 sum += self.hamming_distance(h1[i], h2[i])
-            return sum // len(h1)
+            return sum // min(len(h1), len(h2))
         
         return h1 - h2
 
@@ -252,20 +256,24 @@ class HashStorage:
 
 
     def get_image_hash(self, image_path):
+        if os.path.getsize(image_path) == 0:
+            return [None, None, (0, 0), False]
         #if self.advanced_comparison:
-            try:
-                image = Image.open(image_path)
-                try: 
-                    return [imagehash.phash(image), None, self.get_image_size(image), False]
-                except:
-                    image.thumbnail((1000, 1000))
-                    return [imagehash.phash(image), None, self.get_image_size(image), False]
+        try:
+            image = Image.open(image_path)
+            try: 
+                return [imagehash.phash(image), None, self.get_image_size(image), False]
             except:
-                im = Image.new(mode="RGB", size=(200, 200))
-                return [imagehash.phash(im), None, (0, 0), False]
+                image.thumbnail((1000, 1000))
+                return [imagehash.phash(image), None, self.get_image_size(image), False]
+        except:
+            im = Image.new(mode="RGB", size=(200, 200))
+            return [imagehash.phash(im), None, (0, 0), False]
 
 
     def get_video_hashes(self, video_path, frame_interval=24, max_hashes=5):
+        if os.path.getsize(video_path) == 0:
+            return [None, None, (0, 0), False]
         #if self.advanced_comparison:
         try:
             cap = cv2.VideoCapture(video_path)
@@ -300,7 +308,9 @@ class HashStorage:
     
     #### This function is used to check if the image is duplicate or not
     def check_duplicates(self, item, items, new_items):
-        if item[1][3]:
+        if item[1][0] is None:
+            result = (item[0], None, None, 'error')
+        elif item[1][3]:
             result = (item[0], None, None, 'low-res duplicate')
         else:
             if type(item[1][0]) != list:            

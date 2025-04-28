@@ -114,6 +114,7 @@ def show_comparison_dialog(window, paths):
     for i in range(len(old_paths)):
         old_path = old_paths[i]
         new_path = new_paths[i]
+        print(old_path, new_path)
         selection_frame = ttk.Frame(mainframe)
         selection_frame.pack()
         
@@ -260,151 +261,165 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     seen_hashes.load_items()
 
     if enable_threads:
-        progress = 0
-        process = "Hashing old images"
-        total = len(images1)
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(seen_hashes.hash_image, image) for image in images1]
-            for i, future in enumerate(futures):
-                if stop_event.is_set():
-                    return
-                future.result()  # Wait for the task to complete
-                if i % 10 == 0:  # Update progress every 10 iterations
-                    progress = i / total
+        if type_select_var.get() in ["1", "2"]:
+            progress = 0
+            process = "Hashing old images"
+            total = len(images1)
+            with ThreadPoolExecutor() as executor:
+                futures = [executor.submit(seen_hashes.hash_image, image) for image in images1]
+                for i, future in enumerate(futures):
+                    if stop_event.is_set():
+                        return
+                    future.result()  # Wait for the task to complete
+                    if i % 10 == 0:  # Update progress every 10 iterations
+                        progress = i / total
 
-        progress = 0
-        process = "Hashing old videos"
-        total = len(videos1)
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(seen_hashes.hash_video, video) for video in videos1]
-            for i, future in enumerate(futures):
-                if stop_event.is_set():
-                    return
-                future.result()
-                if i % 10 == 0:
-                    progress = i / total
+        if type_select_var.get() in ["1", "3"]:
+            progress = 0
+            process = "Hashing old videos"
+            total = len(videos1)
+            with ThreadPoolExecutor() as executor:
+                futures = [executor.submit(seen_hashes.hash_video, video) for video in videos1]
+                for i, future in enumerate(futures):
+                    if stop_event.is_set():
+                        return
+                    future.result()
+                    if i % 10 == 0:
+                        progress = i / total
 
-        progress = 0
-        process = "Hashing new images"
-        total = len(images2)
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(seen_hashes.hash_image, image, True) for image in images2]
-            for i, future in enumerate(futures):
-                if stop_event.is_set():
-                    return
-                future.result()
-                if i % 10 == 0:
-                    progress = i / total
+        if type_select_var.get() in ["1", "2"]:
+            progress = 0
+            process = "Hashing new images"
+            total = len(images2)
+            with ThreadPoolExecutor() as executor:
+                futures = [executor.submit(seen_hashes.hash_image, image, True) for image in images2]
+                for i, future in enumerate(futures):
+                    if stop_event.is_set():
+                        return
+                    future.result()
+                    if i % 10 == 0:
+                        progress = i / total
 
-        progress = 0
-        process = "Hashing new videos"
-        total = len(videos2)
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(seen_hashes.hash_video, video, True) for video in videos2]
-            for i, future in enumerate(futures):
-                if stop_event.is_set():
-                    return
-                future.result()
-                if i % 10 == 0:
-                    progress = i / total
+        if type_select_var.get() in ["1", "3"]:
+            progress = 0
+            process = "Hashing new videos"
+            total = len(videos2)
+            with ThreadPoolExecutor() as executor:
+                futures = [executor.submit(seen_hashes.hash_video, video, True) for video in videos2]
+                for i, future in enumerate(futures):
+                    if stop_event.is_set():
+                        return
+                    future.result()
+                    if i % 10 == 0:
+                        progress = i / total
 
     else:
-        progress = 0
-        process = "Hashing old images"
-        total = len(images1)
-        for i, image in enumerate(images1): 
-            if stop_event.is_set():
-                    return
-            seen_hashes.hash_image(image)
-            if i % 10 == 0:
-                    progress = i / total
+        if type_select_var.get() in ["1", "2"]:
+            progress = 0
+            process = "Hashing old images"
+            total = len(images1)
+            for i, image in enumerate(images1): 
+                if stop_event.is_set():
+                        return
+                seen_hashes.hash_image(image)
+                if i % 10 == 0:
+                        progress = i / total
 
-        progress = 0
-        process = "Hashing old video"
-        total = len(videos1)
-        for i, video in enumerate(videos1): 
-            if stop_event.is_set():
-                    return
-            seen_hashes.hash_video(video)
-            if i % 10 == 0:
-                    progress = i / total
+        if type_select_var.get() in ["1", "3"]:
+            progress = 0
+            process = "Hashing old video"
+            total = len(videos1)
+            for i, video in enumerate(videos1): 
+                if stop_event.is_set():
+                        return
+                seen_hashes.hash_video(video)
+                if i % 10 == 0:
+                        progress = i / total
 
-        progress = 0
-        process = "Hashing new images"
-        total = len(images2)
-        for i, image in enumerate(images2): 
-            if stop_event.is_set():
-                    return
-            seen_hashes.hash_image(image, True)
-            if i % 10 == 0:
-                    progress = i / total
+        if type_select_var.get() in ["1", "2"]:
+            progress = 0
+            process = "Hashing new images"
+            total = len(images2)
+            for i, image in enumerate(images2): 
+                if stop_event.is_set():
+                        return
+                seen_hashes.hash_image(image, True)
+                if i % 10 == 0:
+                        progress = i / total
 
-        progress = 0
-        process = "Hashing new videos"
-        total = len(videos2)
-        for i, video in enumerate(videos2): 
-            if stop_event.is_set():
-                    return
-            seen_hashes.hash_video(video, True)
-            if i % 10 == 0:
-                    progress = i / total
+        if type_select_var.get() in ["1", "3"]:
+            progress = 0
+            process = "Hashing new videos"
+            total = len(videos2)
+            for i, video in enumerate(videos2): 
+                if stop_event.is_set():
+                        return
+                seen_hashes.hash_video(video, True)
+                if i % 10 == 0:
+                        progress = i / total
 
     progress = 0
     process = "saving hashes for later use"
     seen_hashes.save_items()
 
     progress = 0
-    process = "Building image tree"
-    seen_hashes.build_image_tree()
+    if type_select_var.get() in ["1", "2"]:
+        process = "Building image tree"
+        seen_hashes.build_image_tree()
 
-    process = "Building video tree"
-    seen_hashes.build_video_tree()
+    if type_select_var.get() in ["1", "3"]:
+        process = "Building video tree"
+        seen_hashes.build_video_tree()
 
     if enable_threads:
-        progress = 0
-        process = "Finding duplicate images"
-        total = len(seen_hashes.new_images)
-        with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(seen_hashes.check_duplicates, image, seen_hashes.images, seen_hashes.new_images) for image in seen_hashes.new_images.items()]
-                for i, future in enumerate(futures): 
-                        if stop_event.is_set():
-                                return
-                        future.result()
-                        if i % 10 == 0:
-                                progress = i / total
+        if type_select_var.get() in ["1", "2"]:
+            progress = 0
+            process = "Finding duplicate images"
+            total = len(seen_hashes.new_images)
+            with ThreadPoolExecutor() as executor:
+                    futures = [executor.submit(seen_hashes.check_duplicates, image, seen_hashes.images, seen_hashes.new_images) for image in seen_hashes.new_images.items()]
+                    for i, future in enumerate(futures): 
+                            if stop_event.is_set():
+                                    return
+                            future.result()
+                            if i % 10 == 0:
+                                    progress = i / total
 
-        progress = 0
-        process = "Finding duplicate videos"
-        total = len(seen_hashes.new_videos)
-        with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(seen_hashes.check_duplicates, video, seen_hashes.videos, seen_hashes.new_videos) for video in seen_hashes.new_videos.items()]
-                for i, future in enumerate(futures): 
-                        if stop_event.is_set():
-                                return
-                        future.result()
-                        if i % 10 == 0:
-                                progress = i / total                    
+        if type_select_var.get() in ["1", "3"]:
+            progress = 0
+            process = "Finding duplicate videos"
+            total = len(seen_hashes.new_videos)
+            with ThreadPoolExecutor() as executor:
+                    futures = [executor.submit(seen_hashes.check_duplicates, video, seen_hashes.videos, seen_hashes.new_videos) for video in seen_hashes.new_videos.items()]
+                    for i, future in enumerate(futures): 
+                            if stop_event.is_set():
+                                    return
+                            future.result()
+                            if i % 10 == 0:
+                                    progress = i / total                    
 
-    else:
-        progress = 0
-        process = "Finding duplicate images"
-        total = len(seen_hashes.new_images)
-        for i, image in enumerate(seen_hashes.new_images.items()): 
-                if stop_event.is_set():
-                        return
-                seen_hashes.check_duplicates(image, seen_hashes.images, seen_hashes.new_images)
-                if i % 10 == 0:
-                        progress = i / total
-        
-        progress = 0
-        process = "Finding duplicate videos"
-        total = len(seen_hashes.new_videos)
-        for i, video in enumerate(seen_hashes.new_videos.items()): 
-                if stop_event.is_set():
-                        return
-                seen_hashes.check_duplicates(video, seen_hashes.videos, seen_hashes.new_videos)
-                if i % 10 == 0:
-                        progress = i / total
+    else:  
+        if type_select_var.get() in ["1", "2"]:
+            progress = 0
+            process = "Finding duplicate images"
+            total = len(seen_hashes.new_images)
+            for i, image in enumerate(seen_hashes.new_images.items()): 
+                    if stop_event.is_set():
+                            return
+                    seen_hashes.check_duplicates(image, seen_hashes.images, seen_hashes.new_images)
+                    if i % 10 == 0:
+                            progress = i / total
+
+        if type_select_var.get() in ["1", "3"]:
+            progress = 0
+            process = "Finding duplicate videos"
+            total = len(seen_hashes.new_videos)
+            for i, video in enumerate(seen_hashes.new_videos.items()): 
+                    if stop_event.is_set():
+                            return
+                    seen_hashes.check_duplicates(video, seen_hashes.videos, seen_hashes.new_videos)
+                    if i % 10 == 0:
+                            progress = i / total
 
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
@@ -697,6 +712,20 @@ def on_threshold_change(value):
 
 threshold_slider.config(command=on_threshold_change)
 
+#
+radio_frame = Frame(window)
+radio_frame.pack(pady=20)
+
+type_select_var = StringVar()
+type_select_values = {"Images and videos" : "1",
+                      "Images only" : "2",
+                      "Videos only" : "3"}
+
+for (text, value) in type_select_values.items():
+     ttk.Radiobutton(radio_frame, text=text, variable=type_select_var, value = value).pack(side=LEFT,pady=5)
+
+type_select_var.set("1")
+
 # buttons
 
 buttons_frame = Frame(window)
@@ -713,8 +742,8 @@ def toggle_threads():
     enable_threads = not enable_threads
     enable_threads_button.config(text="Disable threading" if enable_threads else "Enable threading")
 
-enable_threads = True
-enable_threads_button = Button(buttons_frame, text="Disable threading", font=big_font, command=toggle_threads)
+enable_threads = False
+enable_threads_button = Button(buttons_frame, text="Enable threading", font=big_font, command=toggle_threads)
 enable_threads_button.pack(fill=X, expand=True, side=LEFT)
 
 def toggle_meta():
@@ -722,8 +751,8 @@ def toggle_meta():
     extract_meta = not extract_meta
     enable_meta_button.config(text="Disable metadata extraction" if extract_meta else "Enable metadata extraction")
 
-extract_meta = True
-enable_meta_button = Button(buttons_frame, text="Disable metadata extraction", font=big_font, command=toggle_meta)
+extract_meta = False
+enable_meta_button = Button(buttons_frame, text="Enable metadata extraction", font=big_font, command=toggle_meta)
 enable_meta_button.pack(fill=X, expand=True, side=LEFT)
 
 
