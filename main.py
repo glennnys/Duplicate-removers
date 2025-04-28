@@ -18,34 +18,7 @@ import platform
 pillow_heif.register_heif_opener()
 
 ################################## Helper functions ##################################
-def copy_file(file_path, dest_folder):
-    file_name = os.path.basename(file_path)
-    dest_path = os.path.join(dest_folder, file_name)
-    with open(file_path, 'rb') as src, open(dest_path, 'wb') as dest:
-        dest.write(src.read())
-    return dest_path
-
-def rename_file(file_path, new_name):
-    dir_name = os.path.dirname(file_path)
-    ext = os.path.splitext(file_path)[1]
-    new_path = os.path.join(dir_name, f"{new_name}")
-    os.rename(file_path, new_path)
-    return new_path
-
-def swap_files(first_file, second_file):
-    print(first_file)
-    print(second_file)
-    temp_name = os.path.join(os.path.dirname(first_file), "temp_swap_file")
-    os.rename(first_file, temp_name)
-    first_file_name = os.path.basename(first_file)
-    second_file_name = os.path.basename(second_file)
-    first_file_new_path = os.path.join(os.path.dirname(second_file), first_file_name)
-    second_file_new_path = os.path.join(os.path.dirname(first_file), second_file_name)
-    os.rename(second_file, second_file_new_path)
-    os.rename(temp_name, first_file_new_path)
-
-
-def show_comparison_dialog(window, old_paths, new_paths):
+def show_comparison_dialog(window, paths):
 
     def select_all(bool=True):
          for i in range(len(selection_vars)):
@@ -79,6 +52,9 @@ def show_comparison_dialog(window, old_paths, new_paths):
     def on_mousewheel_linux_up(event):    scroll_canvas.yview_scroll(-1, "units")
     def on_mousewheel_linux_down(event):  scroll_canvas.yview_scroll(1, "units")
 
+    if len(paths)>0:
+        old_paths, new_paths = zip(*paths)
+    else: return
     
     selection_vars = [BooleanVar(value=False) for _ in old_paths]
     selection = [False] * len(old_paths)
@@ -176,10 +152,12 @@ def show_comparison_dialog(window, old_paths, new_paths):
     scroll_canvas.yview_moveto(0)
     scroll_canvas.xview_moveto(0)
 
-    
 
     root.wait_window()  # Wait for the dialog to close
-    return selection
+
+    for result in zip(selection, old_paths, new_paths):
+            if result[0]:
+                seen_hashes.swap_files(result[1], result[2])
 
 
 ################################## Main processing function ##################################
@@ -249,10 +227,10 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
             i += 1
             if file2 in remaining_files1:
                 dest_folder = os.path.join(folder3_path, "!Duplicates")
-                copy_file(file2, dest_folder)
+                seen_hashes.copy_file(file2, None, dest_folder)
             else:
                 dest_folder = os.path.join(folder3_path, "!Unsorted")
-                copy_file(file2, dest_folder)
+                seen_hashes.copy_file(file2, None, dest_folder)
             progress = i / total
 
     progress = 0
@@ -409,15 +387,9 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
 
-    print(f"Checked {seen_hashes.i} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images)} times")
+    print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images)} times")
 
-    if len(seen_hashes.higher_res)>0:
-        old_paths, new_paths = zip(*seen_hashes.higher_res)
-        results = show_comparison_dialog(window, old_paths, new_paths)
-
-        for result in zip(results, old_paths, new_paths):
-            if result[0]:
-                swap_files(result[1], result[2])
+    window.after(0, show_comparison_dialog, window, seen_hashes.higher_res)
 
     processing_complete.set()  # Set flag to indicate completion
 
@@ -582,6 +554,8 @@ button1 = Button(entry_frame1, text="Browse", font=small_font, command=lambda: f
 button1.pack(side=LEFT)
 open_folder_button = Button(entry_frame1, text="Open folder", font=small_font, command=lambda: os.startfile(folder_path1.get()) if folder_path1.get() else None)
 open_folder_button.pack(side=LEFT)
+clear_button1 = Button(entry_frame1, text="Clear", font=small_font, command=lambda: (folder_path1.set("")))
+clear_button1.pack(side=LEFT)
 
 frame2 = Frame(window)
 frame2.pack(pady=20)

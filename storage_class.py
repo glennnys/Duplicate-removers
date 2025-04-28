@@ -9,6 +9,7 @@ import random
 import pickle
 import math
 from pathlib import Path
+import shutil
 
 VPTreeNode = namedtuple('VPTreeNode', ['point', 'threshold', 'left', 'right'])
     
@@ -38,11 +39,12 @@ class HashStorage:
         self.new_images = {}
         self.new_videos = {}
         self.higher_res = []
-        self.i = 0
+        self.checked_nodes = 0
 
 
     #TODO: make this work
     def save_items(self):
+        if self.og_path == "": return
         serialized = []
         base_path = os.path.abspath(self.og_path)
         for key, item in self.images.items():
@@ -54,14 +56,14 @@ class HashStorage:
                     hashhex=[str(i) for i in item[0]]
                     serialized.append((key, hashhex, item[2]))
 
-        filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "hashcache.picke")
+        filepath = os.path.join(self.og_path, "!prehashed.cache")
         with open(filepath, 'wb') as f: 
             pickle.dump(serialized, f)
 
 
     def load_items(self):
         self.reset()
-        filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "hashcache.picke")
+        filepath = os.path.join(self.og_path, "!prehashed.cache")
         if not os.path.exists(filepath): return
         with open(filepath, 'rb') as f:
             serialized = pickle.load(f)
@@ -165,7 +167,7 @@ class HashStorage:
         if tree is None or result[3] == "low-res duplicate":
             return result
         
-        self.i += 1
+        self.checked_nodes += 1
         
         query_hash, _, query_dims, _ = new_items[query_path]
         query_res = query_dims[0] * query_dims[1]
@@ -182,7 +184,7 @@ class HashStorage:
 
             if d < self.real_threshold:
                 # If candidate is from old folder
-                if self.is_in_path(candidate_path, self.og_path):
+                if self.is_in_path(candidate_path, self.og_path) and self.og_path != "":
                     if candidate_res >= query_res:
                         return (candidate_res, candidate_path, query_path, "low-res duplicate")
                     else:
@@ -336,13 +338,7 @@ class HashStorage:
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         i = 1
         # if the same file name already exists, add a number at the end
-        while os.path.exists(dest_path):
-            file_name, ext = os.path.splitext(file_name)
-            if file_name.endswith(")"):
-                file_name = file_name[:file_name.rfind("(")].strip()
-            file_name = f"{file_name}({i}){ext}"
-            dest_path = os.path.join(dest_folder, file_name)
-            i += 1
+        dest_path = self.safe_rename(dest_path)
 
         try:
             os.makedirs(dest_folder, exist_ok=True)
@@ -363,6 +359,66 @@ class HashStorage:
         new_path = os.path.join(dir_name, f"{new_name}")
         os.rename(file_path, new_path)
         return new_path
+    
+
+    def swap_files(self, path1, path2):
+        """
+        Swap two files, renaming them if a collision exists (e.g., the same name already exists in the destination folder).
+        
+        Args:
+            path1 (str): Full path to the first file.
+            path2 (str): Full path to the second file.
+        """
+        if not (os.path.isfile(path1) and os.path.isfile(path2)):
+            raise ValueError("Both files must exist.")
+        
+        # Get the directories and file names
+        dir1, name1 = os.path.split(path1)
+        dir2, name2 = os.path.split(path2)
+
+        # Step 1: Handle renaming the destination if the names are the same
+        new_path1 = os.path.join(dir2, name1)  # Target location for path1 (which is in path2's folder)
+        new_path2 = os.path.join(dir1, name2)  # Target location for path2 (which is in path1's folder)
+
+        # cleanly swap them if they have the same name
+        if new_path1 == path2:
+            temp_name = os.path.join(os.path.dirname(path1), "temp_swap_file")
+            os.rename(path1, temp_name)
+            first_file_name = os.path.basename(path1)
+            second_file_name = os.path.basename(path2)
+            first_file_new_path = os.path.join(os.path.dirname(path2), first_file_name)
+            second_file_new_path = os.path.join(os.path.dirname(path1), second_file_name)
+            os.rename(path2, second_file_new_path)
+            os.rename(temp_name, first_file_new_path)
+        
+        # if name is different, make sure there are no other files with the same name
+        else:
+            if os.path.exists(new_path1):
+                new_path1 = self.safe_rename(new_path1)  # Rename if a conflict occurs
+
+            if os.path.exists(new_path2):
+                new_path2 = self.safe_rename(new_path2)  # Rename if a conflict occurs
+
+            # Step 2: Swap files
+            shutil.move(path1, new_path1)  # Move path1 to path2's folder (possibly renamed)
+            shutil.move(path2, new_path2)  # Move path2 to path1's folder (possibly renamed)
+
+            
+    
+    def safe_rename(self, destination):
+        """
+        Generate a safe file name by adding (1), (2), etc., if the file already exists.
+        """
+        base_name, ext = os.path.splitext(destination)
+        counter = 1
+        new_destination = destination
+
+        while os.path.exists(new_destination):
+            new_destination = f"{base_name}({counter}){ext}"
+            counter += 1
+
+        return new_destination
+
     
     def set_json_files(self, json_files):
         self.json_files = json_files
