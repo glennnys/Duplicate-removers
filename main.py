@@ -207,7 +207,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     dupe_dest = os.path.normpath(os.path.join(folder3_path, "!Duplicate"))
     err_dest = os.path.normpath(os.path.join(folder3_path, "!Error"))
 
-    seen_hashes.set_destination_folders(new_dest, dupe_dest, err_dest, folder2_path)
+    seen_hashes.set_destination_folders(new_dest, dupe_dest, err_dest, folder2_path, folder1_path)
 
     # if folder1_path is None, only compare files in folder2_path
     if folder1_path is not None:
@@ -254,6 +254,10 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
                 dest_folder = os.path.join(folder3_path, "!Unsorted")
                 copy_file(file2, dest_folder)
             progress = i / total
+
+    progress = 0
+    process = "loading old hashes"
+    seen_hashes.load_items()
 
     if enable_threads:
         progress = 0
@@ -344,6 +348,10 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
             seen_hashes.hash_video(video, True)
             if i % 10 == 0:
                     progress = i / total
+
+    progress = 0
+    process = "saving hashes for later use"
+    seen_hashes.save_items()
 
     progress = 0
     process = "Building image tree"

@@ -18,6 +18,7 @@ class HashStorage:
         self.extract_meta = extract_meta
 
         self.og_path = ""
+        self.old_path = ""
         self.new_dest = ""
         self.dupe_dest = ""
         self.err_dest = ""
@@ -42,44 +43,56 @@ class HashStorage:
 
 
     #TODO: make this work
-    def save_items(self, items, file_path):
+    def save_items(self):
         serialized = []
-        for item in items:
-            serialized.append((item[0], str(item[1])))
+        base_path = os.path.abspath(self.og_path)
+        for key, item in self.images.items():
+            path1 = os.path.abspath(key)
+            if path1.startswith(base_path):
+                if type(item[0]) != list:
+                    serialized.append((key, str(item[0]), item[2]))
+                else:
+                    hashhex=[str(i) for i in item[0]]
+                    serialized.append((key, hashhex, item[2]))
 
-        with open(file_path, 'wb') as f:
+        filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "hashcache.picke")
+        with open(filepath, 'wb') as f: 
             pickle.dump(serialized, f)
 
 
-    def load_items(self, file_path):
-        with open(file_path, 'rb') as f:
+    def load_items(self):
+        filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "hashcache.picke")
+        if not os.path.exists(filepath): return
+        with open(filepath, 'rb') as f:
             serialized = pickle.load(f)
 
-        restored = []
-        for path, hash_str,in serialized:
-            if isinstance(hash_str, tuple):
-                hash_val = hash_str
-            else:
-                hash_val = imagehash.hex_to_hash(hash_str)
-            restored.append((path, hash_val))
+        for path, hash_str, res in serialized:
+            if os.path.exists(path):
+                if isinstance(hash_str, list):
+                    hash_val = [imagehash.hex_to_hash(hash_st) for hash_st in hash_str]
+                    self.videos[path] = [hash_val, None, res, False]
+                else:
+                    hash_val = imagehash.hex_to_hash(hash_str)
+                    self.images[path] = [hash_val, None, res, False]
 
-        return restored
     
     def hash_image(self, image, is_new=False):
-        item = self.get_image_hash(image)
-        if is_new:
+        if image not in self.images:
+            item = self.get_image_hash(image)
+            if is_new:
+                with self.lock1:
+                    self.new_images[image] = item
             with self.lock1:
-                self.new_images[image] = item
-        with self.lock1:
-            self.images[image] = item
+                self.images[image] = item
 
     def hash_video(self, video, is_new=False):
-        item = self.get_video_hashes(video)
-        if is_new:
+        if video not in self.videos:
+            item = self.get_video_hashes(video)
+            if is_new:
+                with self.lock2:
+                    self.new_videos[video] = item
             with self.lock2:
-                self.new_videos[video] = item
-        with self.lock2:
-            self.videos[video] = item
+                self.videos[video] = item
                 
 
     def build_image_tree(self):
@@ -163,8 +176,8 @@ class HashStorage:
             d = self.hamming_distance(query_hash, candidate_hash)
 
             if d < self.real_threshold:
-                # If candidate is from old folder (not in self.og_path)
-                if not self.is_in_path(candidate_path, self.og_path):
+                # If candidate is from old folder (not in self.old_path)
+                if not self.is_in_path(candidate_path, self.old_path):
                     if candidate_res >= query_res:
                         return (candidate_res, candidate_path, query_path, "low-res duplicate")
                     else:
@@ -313,7 +326,7 @@ class HashStorage:
     ### This function is used to copy the file to the destination folder and perform the metadata extraction
     def copy_file(self, file_path, file, dest_folder):
         #file_name = os.path.basename(file_path)
-        file_name = os.path.relpath(file_path, start=self.og_path)
+        file_name = os.path.relpath(file_path, start=self.old_path)
         dest_path = os.path.join(dest_folder, file_name)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         i = 1
@@ -349,8 +362,9 @@ class HashStorage:
     def set_json_files(self, json_files):
         self.json_files = json_files
 
-    def set_destination_folders(self, new_dest, dupe_dest, err_dest, og_path):
+    def set_destination_folders(self, new_dest, dupe_dest, err_dest, old_path, og_path):
         self.new_dest = new_dest
         self.dupe_dest = dupe_dest
         self.err_dest = err_dest
+        self.old_path = old_path
         self.og_path = og_path
