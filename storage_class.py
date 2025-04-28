@@ -42,15 +42,15 @@ class HashStorage:
         self.checked_nodes = 0
 
 
-    #TODO: make this work
     def save_items(self):
         if self.og_path == "": return
         serialized = []
         base_path = os.path.abspath(self.og_path)
-        for key, item in self.images.items():
+        combination = self.images | self.videos
+        for key, item in combination.items():
             path1 = os.path.abspath(key)
             if path1.startswith(base_path):
-                if type(item[0]) != list:
+                if not isinstance(item[0], list):
                     serialized.append((key, str(item[0]), item[2]))
                 else:
                     hashhex=[str(i) for i in item[0]]
@@ -118,11 +118,15 @@ class HashStorage:
     def get_image_size(self, image):
         if isinstance(image, Image.Image):
             return image.size
+        else:
+            return(0, 0)
     
 
     def get_video_size(self, video):
         if isinstance(video, cv2.VideoCapture):
             return int(video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        else:
+            return(0, 0)
         
     
     def disable_node(self, path, is_image=True):
@@ -175,9 +179,6 @@ class HashStorage:
         candidate_path = tree.point
         candidate_hash, _, candidate_dims, _ = items[candidate_path]
         candidate_res = candidate_dims[0] * candidate_dims[1]
-
-        if query_path == 'D:\\Local data\\Fotos script\\Test\\IMG_1457.HEIC':
-            pass
 
         if candidate_path != query_path:
             d = self.hamming_distance(query_hash, candidate_hash)
@@ -271,6 +272,7 @@ class HashStorage:
                     break
                 if frame_count % frame_interval == 0:
                     frame = Image.fromarray(frame)
+                    frame.show()
                     video_hashes.append(imagehash.phash(frame))
                     hash_count += 1
                 

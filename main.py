@@ -14,6 +14,7 @@ from tkinter.font import Font
 import sv_ttk
 import storage_class as fs
 import platform
+import cv2
 
 pillow_heif.register_heif_opener()
 
@@ -115,9 +116,30 @@ def show_comparison_dialog(window, paths):
         new_path = new_paths[i]
         selection_frame = ttk.Frame(mainframe)
         selection_frame.pack()
-        # Load and resize images to fit the screen nicely
-        img1 = PILImage.open(old_path).resize((400, 400))
-        img2 = PILImage.open(new_path).resize((400, 400))
+        
+
+        # Check if the file is a video or an image
+        try:
+            # Handle image
+            img1 = PILImage.open(old_path).resize((400, 400))
+            img2 = PILImage.open(new_path).resize((400, 400))
+
+        except:
+            # Handle video: extract the first frame as an image
+            video1 = cv2.VideoCapture(old_path)
+            video2 = cv2.VideoCapture(new_path)
+            success, frame1 = video1.read()
+            success, frame2 = video2.read()
+            video1.release()
+            video2.release()
+            if success:
+                img1 = PILImage.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB)).resize((400, 400))
+                img2 = PILImage.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB)).resize((400, 400))
+            else:
+                img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+
+          
 
         tk_img1 = ImageTk.PhotoImage(img1)
         tk_img2 = ImageTk.PhotoImage(img2)
@@ -387,7 +409,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
 
-    print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images)} times")
+    print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times")
 
     window.after(0, show_comparison_dialog, window, seen_hashes.higher_res)
 
