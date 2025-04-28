@@ -17,22 +17,12 @@ class HashStorage:
         self.threshold = threshold
         self.extract_meta = extract_meta
 
-        self.og_path = ""
-        self.old_path = ""
-        self.new_dest = ""
-        self.dupe_dest = ""
-        self.err_dest = ""
-        self.json_files = []
+        self.reset()
+
         self.lock1 = threading.Lock()
         self.lock2 = threading.Lock()
         self.phash_res = phash_res
-        
-        self.images = {}
-        self.videos = {}
-        self.new_images = {}
-        self.new_videos = {}
 
-        self.higher_res = []
 
         if threshold == 1.0:
             self.advanced_comparison = False
@@ -40,6 +30,15 @@ class HashStorage:
             self.advanced_comparison = True
 
         self.real_threshold = math.ceil((phash_res**2) * (1-threshold))
+
+    def reset(self):
+        self.json_files = []
+        self.images = {}
+        self.videos = {}
+        self.new_images = {}
+        self.new_videos = {}
+        self.higher_res = []
+        self.i = 0
 
 
     #TODO: make this work
@@ -61,6 +60,7 @@ class HashStorage:
 
 
     def load_items(self):
+        self.reset()
         filepath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "hashcache.picke")
         if not os.path.exists(filepath): return
         with open(filepath, 'rb') as f:
@@ -162,8 +162,10 @@ class HashStorage:
 
 
     def search_vptree(self, tree, query_path, items, new_items, result=(0.0, None, None, None), is_images=True):
-        if tree is None:
+        if tree is None or result[3] == "low-res duplicate":
             return result
+        
+        self.i += 1
         
         query_hash, _, query_dims, _ = new_items[query_path]
         query_res = query_dims[0] * query_dims[1]
@@ -172,12 +174,15 @@ class HashStorage:
         candidate_hash, _, candidate_dims, _ = items[candidate_path]
         candidate_res = candidate_dims[0] * candidate_dims[1]
 
+        if query_path == 'D:\\Local data\\Fotos script\\Test\\IMG_1457.HEIC':
+            pass
+
         if candidate_path != query_path:
             d = self.hamming_distance(query_hash, candidate_hash)
 
             if d < self.real_threshold:
-                # If candidate is from old folder (not in self.old_path)
-                if not self.is_in_path(candidate_path, self.old_path):
+                # If candidate is from old folder
+                if self.is_in_path(candidate_path, self.og_path):
                     if candidate_res >= query_res:
                         return (candidate_res, candidate_path, query_path, "low-res duplicate")
                     else:

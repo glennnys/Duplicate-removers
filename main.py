@@ -409,13 +409,15 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
 
+    print(f"Checked {seen_hashes.i} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images)} times")
 
-    old_paths, new_paths = zip(*seen_hashes.higher_res)
-    results = show_comparison_dialog(window, old_paths, new_paths)
+    if len(seen_hashes.higher_res)>0:
+        old_paths, new_paths = zip(*seen_hashes.higher_res)
+        results = show_comparison_dialog(window, old_paths, new_paths)
 
-    for result in zip(results, old_paths, new_paths):
-        if result[0]:
-            swap_files(result[1], result[2])
+        for result in zip(results, old_paths, new_paths):
+            if result[0]:
+                swap_files(result[1], result[2])
 
     processing_complete.set()  # Set flag to indicate completion
 
