@@ -117,14 +117,21 @@ class HashStorage:
 
     def get_image_size(self, image):
         if isinstance(image, Image.Image):
-            return image.size
+            if image.size is None:
+                return (0, 0)
+            else:
+                return image.size
         else:
             return(0, 0)
     
 
     def get_video_size(self, video):
         if isinstance(video, cv2.VideoCapture):
-            return int(video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            res = int(video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if res is None:
+                return (0, 0)
+            else:
+                return res
         else:
             return(0, 0)
         
@@ -173,12 +180,17 @@ class HashStorage:
         
         self.checked_nodes += 1
         
-        query_hash, _, query_dims, _ = new_items[query_path]
-        query_res = query_dims[0] * query_dims[1]
-        
-        candidate_path = tree.point
-        candidate_hash, _, candidate_dims, _ = items[candidate_path]
-        candidate_res = candidate_dims[0] * candidate_dims[1]
+        try:
+            query_hash, _, query_dims, _ = new_items[query_path]
+            query_res = query_dims[0] * query_dims[1]
+            
+            candidate_path = tree.point
+            candidate_hash, _, candidate_dims, _ = items[candidate_path]
+
+            candidate_res = candidate_dims[0] * candidate_dims[1]
+        except:
+            #skip nodes with problems
+            return result
 
         if candidate_path != query_path:
             d = self.hamming_distance(query_hash, candidate_hash)
@@ -250,18 +262,12 @@ class HashStorage:
                     return [imagehash.phash(image), None, self.get_image_size(image), False]
             except:
                 im = Image.new(mode="RGB", size=(200, 200))
-                return [imagehash.phash(im), None, None, False]
-        # else:
-        #     hash_algo = hashlib.md5()
-        #     with open(image_path, 'rb') as f:
-        #         for chunk in iter(lambda: f.read(4096), b""):
-        #             hash_algo.update(chunk)
-
-        #     return [hash_algo.hexdigest(), None, self.get_image_size(image), False]
+                return [imagehash.phash(im), None, (0, 0), False]
 
 
     def get_video_hashes(self, video_path, frame_interval=24, max_hashes=5):
         #if self.advanced_comparison:
+        try:
             cap = cv2.VideoCapture(video_path)
             video_hashes = []
             frame_count = 0
@@ -282,18 +288,14 @@ class HashStorage:
 
             if cap.isOpened():
                 cap.release()
-
-            return item
         
-        # else:
-        #     hash_algo = hashlib.md5()
-        #     with open(video_path, 'rb') as f:
-        #         for chunk in iter(lambda: f.read(4096), b""):
-        #             hash_algo.update(chunk)
+        except:
+            im = Image.new(mode="RGB", size=(200, 200))
+            video_hashes = [imagehash.phash(im) for i in range(max_hashes)]
+            item = [video_hashes, None, (0, 0), False]
+    
+        return item
 
-        #     item = [hash_algo.hexdigest(), self.get_video_size(cap), False]
-
-        #     return item
 
     
     #### This function is used to check if the image is duplicate or not
