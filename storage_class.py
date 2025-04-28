@@ -272,7 +272,7 @@ class HashStorage:
                     break
                 if frame_count % frame_interval == 0:
                     frame = Image.fromarray(frame)
-                    frame.show()
+
                     video_hashes.append(imagehash.phash(frame))
                     hash_count += 1
                 
