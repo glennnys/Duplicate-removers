@@ -180,7 +180,7 @@ def remove_suffix(filepath):
     return new_filepath
     
 
-def process_file(file_path, original_path, jsons, file=None):
+def process_file(file_path, original_path, jsons, file=None, remove_jsons=False):
     potential_names = [original_path, remove_suffix(original_path)]
 
     first_existing = next((jsons[name] for name in potential_names if os.path.abspath(name) in jsons), None)
@@ -211,6 +211,13 @@ def process_file(file_path, original_path, jsons, file=None):
                 break
         else:
             print(file_path, "Unknown extension", magic_number)
+
+        if remove_jsons:
+            try:
+                os.remove(first_existing)
+            except:
+                pass
+
     except Exception as e:
         print(file_path, e, magic_number)
         

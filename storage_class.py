@@ -23,6 +23,7 @@ class HashStorage:
         self.lock1 = threading.Lock()
         self.lock2 = threading.Lock()
         self.phash_res = phash_res
+        self.data_handling = "1"
 
 
         if threshold == 1.0:
@@ -43,9 +44,9 @@ class HashStorage:
 
 
     def save_items(self):
-        if self.og_path == "": return
+        if self.existing_folder == "": return
         serialized = []
-        base_path = os.path.abspath(self.og_path)
+        base_path = os.path.abspath(self.existing_folder)
         combination = self.images | self.videos
         for key, item in combination.items():
             path1 = os.path.abspath(key)
@@ -56,14 +57,14 @@ class HashStorage:
                     hashhex=[str(i) for i in item[0]]
                     serialized.append((key, hashhex, item[2]))
 
-        filepath = os.path.join(self.og_path, "!prehashed.cache")
+        filepath = os.path.join(self.existing_folder, "!prehashed.cache")
         with open(filepath, 'wb') as f: 
             pickle.dump(serialized, f)
 
 
     def load_items(self):
         self.reset()
-        filepath = os.path.join(self.og_path, "!prehashed.cache")
+        filepath = os.path.join(self.existing_folder, "!prehashed.cache")
         if not os.path.exists(filepath): return
         with open(filepath, 'rb') as f:
             serialized = pickle.load(f)
@@ -208,7 +209,7 @@ class HashStorage:
 
             if d < self.real_threshold:
                 # If candidate is from old folder
-                if self.is_in_path(candidate_path, self.og_path) and self.og_path != "":
+                if self.is_in_path(candidate_path, self.existing_folder) and self.existing_folder != "":
                     if candidate_res >= query_res:
                         return (candidate_res, candidate_path, query_path, "low-res duplicate")
                     else:
@@ -349,8 +350,22 @@ class HashStorage:
 
     ### This function is used to copy the file to the destination folder and perform the metadata extraction
     def copy_file(self, file_path, file, dest_folder):
-        #file_name = os.path.basename(file_path)
-        file_name = os.path.relpath(file_path, start=self.old_path)
+        # if duplicates shouldn't be moved, return
+        if self.data_handling in ["2", "4"] and dest_folder != self.new_dest: return
+
+        if self.data_handling in ["5"]:
+            if dest_folder != self.new_dest:
+                # if it is a duplicate. remove it
+                try:
+                    os.remove(file_path)
+                    return
+                
+                except Exception as e:
+                    print(e)
+                    return None
+            else: return
+      
+        file_name = os.path.relpath(file_path, start=self.new_folder)
         dest_path = os.path.join(dest_folder, file_name)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
@@ -358,17 +373,28 @@ class HashStorage:
         dest_path = self.safe_rename(dest_path)
 
         try:
-            os.makedirs(dest_folder, exist_ok=True)
-            with open(file_path, 'rb') as src, open(dest_path, 'wb') as dest:
-                dest.write(src.read())
+            #copy or move it
+            if self.data_handling in ["1", "2"]:
+                os.makedirs(dest_folder, exist_ok=True)
+                with open(file_path, 'rb') as src, open(dest_path, 'wb') as dest:
+                    dest.write(src.read())
+
+            elif self.data_handling in ["3", "4"]:
+                os.makedirs(dest_folder, exist_ok=True)
+                os.rename(file_path, dest_path)
 
             if self.extract_meta and dest_folder == self.new_dest:
-                pe.process_file(dest_path, file_path, self.json_files, file)
+                pe.process_file(dest_path, file_path, self.json_files, file, self.json_handling)
 
             return dest_path
+    
         except Exception as e:
             print(e)
             return None
+        
+        
+
+        
 
     def rename_file(self, file_path, new_name):
         dir_name = os.path.dirname(file_path)
@@ -440,9 +466,22 @@ class HashStorage:
     def set_json_files(self, json_files):
         self.json_files = json_files
 
-    def set_destination_folders(self, new_dest, dupe_dest, err_dest, old_path, og_path):
+    def set_destination_folders(self, folder1, folder2, folder3, data_handling, json_handling):
+        if data_handling not in ["5"]:
+            new_dest = os.path.normpath(os.path.join(folder3, "!New"))
+            dupe_dest = os.path.normpath(os.path.join(folder3, "!Duplicate"))
+            err_dest = os.path.normpath(os.path.join(folder3, "!Error"))
+
+        else:
+            new_dest = "new"
+            dupe_dest = "dupe"
+            err_dest = "err"
+        
+
         self.new_dest = new_dest
         self.dupe_dest = dupe_dest
         self.err_dest = err_dest
-        self.old_path = old_path
-        self.og_path = og_path
+        self.existing_folder = folder1
+        self.new_folder = folder2
+        self.data_handling = data_handling
+        self.json_handling = json_handling

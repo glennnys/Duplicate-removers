@@ -185,7 +185,7 @@ def show_comparison_dialog(window, paths):
 
 
 ################################## Main processing function ##################################
-def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
+def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json_handling, stop_event):
     global seen_hashes
     global processing_complete
     global progress
@@ -205,11 +205,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
         if not os.path.exists(dest_folder):
             os.makedirs(dest_folder, exist_ok=True)
 
-    new_dest = os.path.normpath(os.path.join(folder3_path, "!New"))
-    dupe_dest = os.path.normpath(os.path.join(folder3_path, "!Duplicate"))
-    err_dest = os.path.normpath(os.path.join(folder3_path, "!Error"))
-
-    seen_hashes.set_destination_folders(new_dest, dupe_dest, err_dest, folder2_path, folder1_path)
+    seen_hashes.set_destination_folders(folder1_path, folder2_path, folder3_path, data_handling, json_handling)
 
     # if folder1_path is None, only compare files in folder2_path
     if folder1_path is not None:
@@ -243,7 +239,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     remaining_files2 = [file for file in files2 if file not in images2 and file not in videos2 and file not in jsons]
 
     # compare remaining files for exact copies
-    if folder1_path is not None:
+    if folder1_path is not None and folder3_path is not None:
         progress = 0
         process = "Comparing non-image and video files for exact copies"
         total = len(remaining_files2)
@@ -562,12 +558,20 @@ def on_folder3_selected(path):
     if path == '' or path is None:
         return
     folder_path3.set(path)
+    update_radiobuttons()
     
     on_folder_selected()
 
 def on_folder_selected():
     global total_size
-    if folder_path2.get() and folder_path2.get() != '':
+
+    if data_handling_var.get() in ["3", "4"]:
+        label4.config(text=f"No additional space will be taken up on the disk.")
+    
+    elif data_handling_var.get() in ["5"]:
+        label4.config(text=f"Some space might be freed up from the disk.")
+
+    elif folder_path2.get() and folder_path2.get() != '':
         if folder_path3.get() and folder_path3.get() != '':
             # get free space on the disk
             free_space = get_free_space(folder_path3.get())
@@ -575,13 +579,14 @@ def on_folder_selected():
             
             label4.config(text=f"Warning: This process will take up (at most) {total_size}/{free_space} extra on the disk.")
         else:
+            #can no longer be accessed
             label4.config(text=f"Warning: This process will take up (at most) {total_size} extra on the disk.")
 
     elif folder_path3.get() and folder_path3.get() != '':
         free_space = get_free_space(folder_path3.get())
         free_space = format_size(free_space)
         
-        label4.config(text=f"Warning: This process will take up 0/{free_space} extra on the disk.")
+        label4.config(text=f"{free_space} available on disk.")
 
     else:
         label4.config(text="Warning: This process will take up extra on the disk.")
@@ -599,7 +604,7 @@ button1 = Button(entry_frame1, text="Browse", font=small_font, command=lambda: f
 button1.pack(side=LEFT)
 open_folder_button = Button(entry_frame1, text="Open folder", font=small_font, command=lambda: os.startfile(folder_path1.get()) if folder_path1.get() else None)
 open_folder_button.pack(side=LEFT)
-clear_button1 = Button(entry_frame1, text="Clear", font=small_font, command=lambda: (folder_path1.set("")))
+clear_button1 = Button(entry_frame1, text="Clear", font=small_font, command=lambda: (folder_path1.set(""), on_folder_selected()))
 clear_button1.pack(side=LEFT)
 
 frame2 = Frame(window)
@@ -614,11 +619,13 @@ button2 = Button(entry_frame2, text="Browse", font=small_font, command=lambda: o
 button2.pack(side=LEFT,)
 open_folder_button = Button(entry_frame2, text="Open folder", font=small_font, command=lambda: os.startfile(folder_path2.get()) if folder_path2.get() else None)
 open_folder_button.pack(side=LEFT)
+clear_button2 = Button(entry_frame2, text="Clear", font=small_font, command=lambda: (folder_path2.set(""), on_folder_selected()))
+clear_button2.pack(side=LEFT)
 
 
 frame3 = Frame(window)
 frame3.pack(pady=20)
-label3 = Label(frame3, text="Select the folder to store the filtered files", font=mid_font)
+label3 = Label(frame3, text="Select the destination folder (can be left empty)", font=mid_font)
 label3.pack(fill=X, expand=True)
 entry_frame3 = Frame(frame3)
 entry_frame3.pack()
@@ -628,6 +635,44 @@ button3 = Button(entry_frame3, text="Browse", font=small_font, command=lambda: o
 button3.pack(side=LEFT)
 open_folder_button = Button(entry_frame3, text="Open folder", font=small_font, command=lambda: os.startfile(folder_path3.get()) if folder_path3.get() else None)
 open_folder_button.pack(side=LEFT)
+clear_button3 = Button(entry_frame3, text="Clear", font=small_font, command=lambda: (folder_path3.set(""), on_folder_selected(), update_radiobuttons()))
+clear_button3.pack(side=LEFT)
+
+def update_radiobuttons(*args):
+    # Clear current radiobuttons
+    for widget in data_radio_frame.winfo_children():
+        widget.destroy()
+
+    # Determine which options to show
+    if folder_path3.get() == "":
+        data_handling_values = {"Keep new files (duplicates will be deleted)" : "5"}
+        data_handling_var.set("5")
+    else:
+        data_handling_values = {"Copy all files" : "1",
+                                "Copy new files" : "2",
+                                "Move all files" : "3",
+                                "Move new files" : "4",
+                                "Keep new files (duplicates will be deleted)" : "5"}
+        data_handling_var.set("1")
+        
+
+    # Create new radiobuttons
+    for (text, value) in data_handling_values.items():
+        ttk.Radiobutton(data_radio_frame, text=text, variable=data_handling_var, value = value).pack(side=LEFT,pady=5)
+
+#
+data_radio_frame = Frame(window)
+data_radio_frame.pack(pady=20)
+
+data_handling_var = StringVar()
+data_handling_values = {"Keep new files (duplicates will be deleted)" : "5"}
+
+for (text, value) in data_handling_values.items():
+     ttk.Radiobutton(data_radio_frame, text=text, variable=data_handling_var, value = value).pack(side=LEFT,pady=5)
+
+data_handling_var.set("5")
+
+data_handling_var.trace_add('write', lambda *args: on_folder_selected())
 
 ##### add dividing line ######
 ttk.Separator(window, orient=HORIZONTAL).pack(fill=X, expand=True)
@@ -637,9 +682,9 @@ files = []
 
 # warn user that the process will take up space on the disk
 frame4 = Frame(window)
-frame4.pack(pady=20)
-label4 = Label(frame4, text=f"Warning: This process will take up extra on the disk.", font=small_font)
-label4.pack(fill=X, expand=True)
+frame4.pack(expand=True, fill=Y)
+label4 = Label(frame4, text=f"Warning: This process might take up extra space on the disk.", font=small_font)
+label4.pack(fill=X, expand=True, pady=20)
 
 # warn user that the process will take a long time
 frame5 = Frame(window)
@@ -659,9 +704,7 @@ def start_process():
     if not folder_path2.get():
         messagebox.showerror("Error", "Please select the folder with new files")
         return
-    if not folder_path3.get():
-        messagebox.showerror("Error", "Please select the folder to store the filtered files")
-        return
+
     progress_frame.pack(fill=X, expand=True)
     # disable all buttons
     button1.config(state=DISABLED)
@@ -680,7 +723,7 @@ def start_process():
     seen_hashes = fs.HashStorage(threshold=threshold, extract_meta=extract_meta)
     stop_event.clear()
     processing_complete.clear()
-    processing_thread = threading.Thread(target=process_folder, args=(folder_path1.get(), folder_path2.get(), folder_path3.get(), stop_event))
+    processing_thread = threading.Thread(target=process_folder, args=(folder_path1.get(), folder_path2.get(), folder_path3.get(), data_handling_var.get(), delete_jsons_var.get(), stop_event))
     processing_thread.start()
 
     update_progress_and_process()
@@ -733,6 +776,10 @@ for (text, value) in type_select_values.items():
      ttk.Radiobutton(radio_frame, text=text, variable=type_select_var, value = value).pack(side=LEFT,pady=5)
 
 type_select_var.set("1")
+
+delete_jsons_var = BooleanVar()
+delete_jsons_check = ttk.Checkbutton(radio_frame, text="Delete json files after metadata extraction", variable=delete_jsons_var)
+delete_jsons_check.pack(side=LEFT,pady=5)
 
 # buttons
 
