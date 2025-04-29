@@ -12,6 +12,7 @@ import re
 import datetime
 import subprocess
 import os
+import time
 
 pillow_heif.register_heif_opener()
 enable_threading = False
@@ -83,14 +84,18 @@ def extract_json_exif(json_file):
 
     return exif_dict, metadata
 
-def process_exif(file_path, json_exif, exif_type, file=None):
+def process_exif(file_path, json_exif, exif_type, logger, file=None):
     """
     Process and modify EXIF data of an image.
     """
 
     # Open the image if not provided
+    start = time.time()
     image = file if file else Image.open(file_path)
+    logger.add_time(time.time()-start, "Opening image")
+
     try:
+        start = time.time()
         # Load existing EXIF data or initialize an empty EXIF structure
         exif = image.info.get("exif", None)
         exif_dict = piexif.load(exif) if exif else {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "Interop": {}}
@@ -105,17 +110,18 @@ def process_exif(file_path, json_exif, exif_type, file=None):
         # Save the updated EXIF data back to the image
         exif_bytes = piexif.dump(exif_dict)
         image.save(file_path, "jpeg", exif=exif_bytes)
+        logger.add_time(time.time()-start, "Insert metadata")
     except:
         pass
 
 
-def process_meta(file_path, json_data, type, file=None):
+def process_meta(file_path, json_data, type, logger, file=None):
     # Open the image
-    if file is None:
-        image = Image.open(file_path)
-    else:
-        image = file
+    start = time.time()
+    image = file if file else Image.open(file_path)
+    logger.add_time(time.time()-start, "Opening image")
 
+    start = time.time()
     metadata = PngImagePlugin.PngInfo()
 
 
@@ -129,10 +135,11 @@ def process_meta(file_path, json_data, type, file=None):
 
     # Save the image with the new metadata
     image.save(file_path, type, pnginfo=metadata)
+    logger.add_time(time.time()-start, "Insert metadata")
 
 
-def process_no_meta(file_path, json_data, file=None): # simply set the creation time of the file to the "Creation time"
-
+def process_no_meta(file_path, json_data, logger, file=None): # simply set the creation time of the file to the "Creation time"
+    start = time.time()
     creation_time = json_data.get("Creation Time", None)
     creation_time = datetime.datetime.strptime(creation_time, "%Y:%m:%d %H:%M:%S") if creation_time else None
 
@@ -149,10 +156,12 @@ def process_no_meta(file_path, json_data, file=None): # simply set the creation 
     current_times = win32file.GetFileTime(handle)
     win32file.SetFileTime(handle, win_filetime, current_times[1], current_times[2])
     handle.close()
+    logger.add_time(time.time()-start, "Insert metadata")
 
 
 
-def process_atoms(file_path, json_data, file=None):
+def process_atoms(file_path, json_data, logger, file=None):
+    start = time.time()
     # Extract and format the creation time
     creation_time = json_data.get("Creation Time", None)
 
@@ -169,6 +178,7 @@ def process_atoms(file_path, json_data, file=None):
     
     # Execute the command
     subprocess.run(command, check=True)
+    logger.add_time(time.time()-start, "Insert video metadata")
 
 def remove_suffix(filepath):
     directory, filename = os.path.split(filepath)
@@ -181,18 +191,19 @@ def remove_suffix(filepath):
     return new_filepath
     
 
-def process_file(file_path, original_path, jsons, file=None, remove_jsons=False):
+def process_file(file_path, original_path, jsons, logger, file=None, remove_jsons=False, ):
     potential_names = [original_path, remove_suffix(original_path)]
 
     first_existing = next((jsons[name] for name in potential_names if os.path.abspath(name) in jsons), None)
 
 
     if not first_existing:
-        print(f'{original_path} does not appear to have a JSON file')
+        logger.add_error(file_path, "No JSON file")
         return
         
-
+    start = time.time()
     json_exif, json_meta = extract_json_exif(first_existing)
+    logger.add_time(time.time()-start, "Extract metadata")
 
     with open(file_path, 'rb') as f:
         magic_number = f.read(magic_number_length)
@@ -202,16 +213,16 @@ def process_file(file_path, original_path, jsons, file=None, remove_jsons=False)
         for magic, ext in magic_numbers.items():
             if bool(re.search(magic, magic_number)):
                 if ext in ["JPEG", "HEIF", "WEBP"]:
-                    process_exif(file_path, json_exif, ext, file)
+                    process_exif(file_path, json_exif, ext, logger, file)
                 elif ext == "PNG":
-                    process_meta(file_path, json_meta, ext, file)
+                    process_meta(file_path, json_meta, ext, logger, file)
                 elif ext == "GIF":
-                    process_no_meta(file_path, json_meta, file)
+                    process_no_meta(file_path, json_meta, logger, file)
                 elif ext in ["MP4", "MOV"]:
-                    process_atoms(file_path, json_meta, file)
+                    process_atoms(file_path, json_meta, logger, file)
                 break
         else:
-            print(file_path, "Unknown extension", magic_number)
+            logger.add_error(file_path, "Unknown extension")
 
         if remove_jsons:
             try:
@@ -220,5 +231,5 @@ def process_file(file_path, original_path, jsons, file=None, remove_jsons=False)
                 pass
 
     except Exception as e:
-        print(file_path, e, magic_number)
+        logger.add_error(file_path, e)
         

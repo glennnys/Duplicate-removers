@@ -16,6 +16,7 @@ import storage_class as fs
 import platform
 import cv2
 import json
+import logkeeper
 
 pillow_heif.register_heif_opener()
 
@@ -149,23 +150,33 @@ def show_comparison_dialog(window, paths):
         images.append(tk_img1)
         images.append(tk_img2)
         
+        left_image_frame = Frame(selection_frame)
+        left_image_frame.pack(side="left")
+        
         # Radiobutton for False
         false_button = ttk.Radiobutton(
-            selection_frame,
+            left_image_frame,
             image=tk_img1,
             variable=selection_vars[i],
             value=False
         )
-        false_button.pack(side="left", padx=10, pady=10)
+        false_button.pack(padx=10, pady=10)
+
+        ttk.Label(left_image_frame, text=old_path).pack()
+
+        right_image_frame = Frame(selection_frame)
+        right_image_frame.pack(side="right")
 
         # Radiobutton for True
         true_button = ttk.Radiobutton(
-            selection_frame,
+            right_image_frame,
             image=tk_img2,
             variable=selection_vars[i],
             value=True
         )
-        true_button.pack(side="left", padx=10, pady=10)
+        true_button.pack(padx=10, pady=10)
+
+        ttk.Label(right_image_frame, text=new_path).pack()
 
     root.update()
 
@@ -194,6 +205,8 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
     global i
     global total
 
+    logger = logkeeper.LogKeeper()
+
     startiest_time = time.time()
     files1 = []
     files2 = []
@@ -207,7 +220,9 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                 os.makedirs(dest_folder, exist_ok=True)
 
     seen_hashes.set_destination_folders(folder1_path, folder2_path, folder3_path, data_handling, json_handling)
+    seen_hashes.set_logger(logger)
 
+    start = time.time()
     # if folder1_path is None, only compare files in folder2_path
     if folder1_path is not None:
         for root, _, file_names in os.walk(folder1_path):
@@ -238,8 +253,10 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             jsons_dict[os.path.join(os.path.dirname(file_path), data['title'])] = os.path.abspath(file_path)
 
     remaining_files2 = [file for file in files2 if file not in images2 and file not in videos2 and file not in jsons]
+    logger.add_time(time.time()-start, "Setup")
 
     # compare remaining files for exact copies
+    start = time.time()
     if folder1_path is not None and folder3_path is not None:
         progress = 0
         process = "Comparing non-image and video files for exact copies"
@@ -258,10 +275,15 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                 seen_hashes.copy_file(file2, None, dest_folder)
             progress = i / total
 
+    logger.add_time(time.time()-start, "Compare remaining")
+
+    start = time.time()
     progress = 0
     process = "loading old hashes"
     seen_hashes.load_items()
+    logger.add_time(time.time()-start, "Load hashes")
 
+    
     if enable_threads:
         if type_select_var.get() in ["1", "2"]:
             progress = 0
@@ -322,7 +344,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             total = len(images1)
             for i, image in enumerate(images1): 
                 if stop_event.is_set():
-                        return
+                    return
                 seen_hashes.hash_image(image)
                 if i % 10 == 0:
                         progress = i / total
@@ -333,7 +355,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             total = len(videos1)
             for i, video in enumerate(videos1): 
                 if stop_event.is_set():
-                        return
+                    return
                 seen_hashes.hash_video(video)
                 if i % 10 == 0:
                         progress = i / total
@@ -344,7 +366,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             total = len(images2)
             for i, image in enumerate(images2): 
                 if stop_event.is_set():
-                        return
+                    return
                 seen_hashes.hash_image(image, True)
                 if i % 10 == 0:
                         progress = i / total
@@ -355,7 +377,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             total = len(videos2)
             for i, video in enumerate(videos2): 
                 if stop_event.is_set():
-                        return
+                    return
                 seen_hashes.hash_video(video, True)
                 if i % 10 == 0:
                         progress = i / total
@@ -384,7 +406,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     futures = [executor.submit(seen_hashes.check_duplicates, image, seen_hashes.images, seen_hashes.new_images) for image in seen_hashes.new_images.items()]
                     for i, future in enumerate(futures): 
                             if stop_event.is_set():
-                                    return
+                                return
                             future.result()
                             if i % 10 == 0:
                                     progress = i / total
@@ -397,7 +419,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     futures = [executor.submit(seen_hashes.check_duplicates, video, seen_hashes.videos, seen_hashes.new_videos) for video in seen_hashes.new_videos.items()]
                     for i, future in enumerate(futures): 
                             if stop_event.is_set():
-                                    return
+                                return
                             future.result()
                             if i % 10 == 0:
                                     progress = i / total                    
@@ -408,7 +430,8 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             process = "Finding duplicate images"
             total = len(seen_hashes.new_images)
             for i, image in enumerate(seen_hashes.new_images.items()): 
-                    if stop_event.is_set():                            return
+                    if stop_event.is_set():                            
+                        return
                     seen_hashes.check_duplicates(image, seen_hashes.images, seen_hashes.new_images)
                     if i % 10 == 0:
                             progress = i / total
@@ -419,7 +442,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             total = len(seen_hashes.new_videos)
             for i, video in enumerate(seen_hashes.new_videos.items()): 
                     if stop_event.is_set():
-                            return
+                        return
                     seen_hashes.check_duplicates(video, seen_hashes.videos, seen_hashes.new_videos)
                     if i % 10 == 0:
                             progress = i / total
@@ -427,8 +450,11 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
 
-    print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times")
+    print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {100*(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes} speed up.")
     print(f"{len(seen_hashes.higher_res)} images or videos have a higher resolution than their pre-existing counterpart")
+
+    print("total: ", logger.get_time())
+    print("avg: ", logger.get_time(avg=True))
 
     window.after(0, show_comparison_dialog, window, seen_hashes.higher_res)
 

@@ -10,6 +10,7 @@ import pickle
 import math
 from pathlib import Path
 import shutil
+import time
 
 VPTreeNode = namedtuple('VPTreeNode', ['point', 'threshold', 'left', 'right'])
     
@@ -80,6 +81,7 @@ class HashStorage:
 
     
     def hash_image(self, image, is_new=False):
+        start = time.time()
         if image not in self.images:
             item = self.get_image_hash(image)
             if is_new:
@@ -87,8 +89,10 @@ class HashStorage:
                     self.new_images[image] = item
             with self.lock1:
                 self.images[image] = item
+        self.logger.add_time(time.time()-start, "Hash image")
 
     def hash_video(self, video, is_new=False):
+        start = time.time()
         if video not in self.videos:
             item = self.get_video_hashes(video)
             if is_new:
@@ -96,13 +100,18 @@ class HashStorage:
                     self.new_videos[video] = item
             with self.lock2:
                 self.videos[video] = item
+        self.logger.add_time(time.time()-start, "Hash video")
                 
 
     def build_image_tree(self):
+        start = time.time()
         self.image_tree = self.build_vptree(self.images)
+        self.logger.add_time(time.time()-start, "Build image tree")
 
     def build_video_tree(self):
+        start = time.time()
         self.video_tree = self.build_vptree(self.videos)
+        self.logger.add_time(time.time()-start, "Build video tree")
 
     ### This function is used to calculate the similarity between two hashes
     def hamming_distance(self, h1, h2):
@@ -312,15 +321,20 @@ class HashStorage:
     
     #### This function is used to check if the image is duplicate or not
     def check_duplicates(self, item, items, new_items):
+        start1 = time.time()
         if item[1][0] is None:
             result = (item[0], None, None, 'error')
         elif item[1][3]:
             result = (item[0], None, None, 'low-res duplicate')
         else:
-            if type(item[1][0]) != list:            
+            if type(item[1][0]) != list:
+                start2 = time.time()            
                 result = self.search_vptree(self.image_tree, item[0], items, new_items)
+                self.logger.add_time(time.time()-start2, "Search images")
             else:
+                start2 = time.time() 
                 result = self.search_vptree(self.video_tree, item[0], items, new_items, is_images=False)
+                self.logger.add_time(time.time()-start2, "Search videos")
       
         
         if result is None:
@@ -336,8 +350,12 @@ class HashStorage:
             destination = self.dupe_dest
         else:
             destination = self.err_dest
+
+        self.logger.add_time(time.time()-start1, "Searching duplicates")
         
+        start = time.time()
         dest_file = self.copy_file(item[0], None, destination)
+        self.logger.add_time(time.time()-start, "Copy item")
 
         if result[3] == "high-res duplicate" and dest_file is not None:
             self.higher_res.append((result[1], dest_file))
@@ -361,11 +379,11 @@ class HashStorage:
                     return file_path
                 
                 except Exception as e:
-                    print(e)
+                    self.logger.add_error(file_path, e)
                     return None
             else:
                 if self.extract_meta:
-                    pe.process_file(file_path, file_path, self.json_files, file, self.json_handling)
+                    pe.process_file(file_path, file_path, self.json_files, self.logger, file, self.json_handling)
                 
                 return file_path
       
@@ -388,12 +406,12 @@ class HashStorage:
                 os.rename(file_path, dest_path)
 
             if self.extract_meta and dest_folder == self.new_dest:
-                pe.process_file(dest_path, file_path, self.json_files, file, self.json_handling)
+                pe.process_file(dest_path, file_path, self.json_files, self.logger, file, self.json_handling)
 
             return dest_path
     
         except Exception as e:
-            print(e)
+            self.logger.add_error(file_path, e)
             return None
         
         
@@ -489,3 +507,6 @@ class HashStorage:
         self.new_folder = folder2
         self.data_handling = data_handling
         self.json_handling = json_handling
+
+    def set_logger(self, logger):
+        self.logger = logger
