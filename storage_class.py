@@ -358,12 +358,16 @@ class HashStorage:
                 # if it is a duplicate. remove it
                 try:
                     os.remove(file_path)
-                    return
+                    return file_path
                 
                 except Exception as e:
                     print(e)
                     return None
-            else: return
+            else:
+                if self.extract_meta:
+                    pe.process_file(file_path, file_path, self.json_files, file, self.json_handling)
+                
+                return file_path
       
         file_name = os.path.relpath(file_path, start=self.new_folder)
         dest_path = os.path.join(dest_folder, file_name)

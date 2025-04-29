@@ -200,10 +200,11 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
     jsons = []
 
     # Create destination folders
-    for folder in ["!Duplicate", "!New", "!Error", "!Unsorted"]:
-        dest_folder = os.path.join(folder3_path, folder)
-        if not os.path.exists(dest_folder):
-            os.makedirs(dest_folder, exist_ok=True)
+    if folder3_path != "":
+        for folder in ["!Duplicate", "!New", "!Error", "!Unsorted"]:
+            dest_folder = os.path.join(folder3_path, folder)
+            if not os.path.exists(dest_folder):
+                os.makedirs(dest_folder, exist_ok=True)
 
     seen_hashes.set_destination_folders(folder1_path, folder2_path, folder3_path, data_handling, json_handling)
 
@@ -407,8 +408,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             process = "Finding duplicate images"
             total = len(seen_hashes.new_images)
             for i, image in enumerate(seen_hashes.new_images.items()): 
-                    if stop_event.is_set():
-                            return
+                    if stop_event.is_set():                            return
                     seen_hashes.check_duplicates(image, seen_hashes.images, seen_hashes.new_images)
                     if i % 10 == 0:
                             progress = i / total

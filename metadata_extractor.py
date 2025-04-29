@@ -33,15 +33,14 @@ magic_numbers = {
 
 magic_number_length = 16
 
-def extract_json_exif(json_file, files):
+def extract_json_exif(json_file):
     exif_dict = {"0th": {}, "Exif": {}, "GPS": {}}
     metadata = {}
 
     # Get the JSON data (if a corresponding JSON file exists)
     json_data = None
-    if json_file in files:
-        with open(json_file, 'r') as f:
-            json_data = json.load(f)
+    with open(json_file, 'r') as f:
+        json_data = json.load(f)
 
     # Add JSON data to EXIF (mapping certain fields from JSON to EXIF tags)
     if json_data:
@@ -119,12 +118,14 @@ def process_meta(file_path, json_data, type, file=None):
 
     metadata = PngImagePlugin.PngInfo()
 
-    for key, value in image.info.items():
-        if isinstance(value, str):  # Only process text metadata
-            if key in json_data:
-                metadata.add_text(key, json_data[key])
-            else:
-                metadata.add_text(key, value)
+
+    # Merge metadata
+    all_keys = set(image.info.keys()).union(json_data.keys())
+    for key in all_keys:
+        original_value = image.info.get(key)
+        new_value = json_data.get(key, original_value)
+        if isinstance(new_value, str):  # Ensure value is a string
+            metadata.add_text(key, new_value)
 
     # Save the image with the new metadata
     image.save(file_path, type, pnginfo=metadata)
@@ -191,7 +192,7 @@ def process_file(file_path, original_path, jsons, file=None, remove_jsons=False)
         return
         
 
-    json_exif, json_meta = extract_json_exif(first_existing, jsons)
+    json_exif, json_meta = extract_json_exif(first_existing)
 
     with open(file_path, 'rb') as f:
         magic_number = f.read(magic_number_length)
