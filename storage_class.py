@@ -33,7 +33,7 @@ class HashStorage:
         self.real_threshold = math.ceil((phash_res**2) * (1-threshold))
 
     def reset(self):
-        self.json_files = []
+        self.json_files = {}
         self.images = {}
         self.videos = {}
         self.new_images = {}
@@ -178,7 +178,14 @@ class HashStorage:
         return _build(list(items_dict.keys()))
 
 
-    def search_vptree(self, tree, query_path, items, new_items, result=(0.0, None, None, None), is_images=True):
+    def search_vptree(self, tree, query_path, items, new_items, result=None, is_images=True):
+        if result is None:
+            try:
+                query_hash, _, query_dims, _ = new_items[query_path]
+                query_res = query_dims[0] * query_dims[1]
+                result = (query_res, None, query_path, "new")
+            except:
+                result = (0, None, query_path, "new")
         if tree is None or result[3] == "low-res duplicate":
             return result
         
@@ -219,10 +226,6 @@ class HashStorage:
                             self.disable_node(candidate_path, is_images)
                         else:
                             return (candidate_res, candidate_path, query_path, "low-res duplicate")
-
-            else:
-                if result[3] is None:
-                    result = (query_res, result[1], query_path, "new")
 
         d = self.hamming_distance(query_hash, candidate_hash)
 
@@ -350,7 +353,7 @@ class HashStorage:
         file_name = os.path.relpath(file_path, start=self.old_path)
         dest_path = os.path.join(dest_folder, file_name)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        i = 1
+
         # if the same file name already exists, add a number at the end
         dest_path = self.safe_rename(dest_path)
 

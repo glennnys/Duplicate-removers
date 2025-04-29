@@ -15,6 +15,7 @@ import sv_ttk
 import storage_class as fs
 import platform
 import cv2
+import json
 
 pillow_heif.register_heif_opener()
 
@@ -232,10 +233,14 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     images2 = [file for file in files2 if os.path.splitext(file)[1].lower() in [".jpg", ".jpeg", ".png", ".heic", ".webp"]]
     videos2 = [file for file in files2 if os.path.splitext(file)[1].lower() in [".mp4", ".mov", ".avi"]]
     jsons = [file for file in files2 if os.path.splitext(file)[1].lower() in [".json"]]
+    jsons_dict = {}
+
+    for file_path in jsons:
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+            jsons_dict[os.path.join(os.path.dirname(file_path), data['title'])] = os.path.abspath(file_path)
 
     remaining_files2 = [file for file in files2 if file not in images2 and file not in videos2 and file not in jsons]
-
-    seen_hashes.set_json_files(jsons)
 
     # compare remaining files for exact copies
     if folder1_path is not None:
@@ -362,6 +367,8 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     process = "saving hashes for later use"
     seen_hashes.save_items()
 
+    seen_hashes.set_json_files(jsons_dict)
+
     progress = 0
     if type_select_var.get() in ["1", "2"]:
         process = "Building image tree"
@@ -425,6 +432,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, stop_event):
     print(f"Processing time: {processing_time:.2f} seconds")
 
     print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times")
+    print(f"{len(seen_hashes.higher_res)} images or videos have a higher resolution than their pre-existing counterpart")
 
     window.after(0, show_comparison_dialog, window, seen_hashes.higher_res)
 

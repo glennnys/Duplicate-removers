@@ -168,41 +168,28 @@ def process_atoms(file_path, json_data, file=None):
     
     # Execute the command
     subprocess.run(command, check=True)
+
+def remove_suffix(filepath):
+    directory, filename = os.path.split(filepath)
+    name, ext = os.path.splitext(filename)
+    
+    # Remove ' (1)' if it appears at the end of the name
+    new_name = re.sub(r' \(\d+\)$', '', name)
+    
+    new_filepath = os.path.join(directory, new_name + ext)
+    return new_filepath
     
 
 def process_file(file_path, original_path, jsons, file=None):
-    json_file = []
-    json_file.append(original_path + ".json")
-    json_file.append(original_path + ".json")
-    file_name3, _ = os.path.splitext(original_path)
-    json_file.append(file_name3 + ".json")
-    json_file.append(original_path[:-1] + ".json")
-    json_file.append(original_path[:-2] + ".json")
-    json_file.append(original_path[:-3] + ".json")
-    json_file.append(original_path[:-4] + ".json")
-    json_file.append(original_path[:-5] + ".json")
-    json_file.append(original_path[:-6] + ".json")
+    potential_names = [original_path, remove_suffix(original_path)]
 
-    first_existing = next((file for file in json_file if file in jsons), None)
+    first_existing = next((jsons[name] for name in potential_names if os.path.abspath(name) in jsons), None)
 
 
     if not first_existing:
-        #problem solving
-        match = re.search(r'\((\d+)\)(?!.*\(\d+\))', json_file[0])
-        if match:
-            # Extract the base name and pattern
-            base_name = re.sub(r'\((\d+)\)(?!.*\(\d+\))', '', json_file[0])  # Remove the last occurrence of (x)
-            bracket_part = match.group(0)  # The matched (x) part
-            # Insert the bracket part right before the .json extension
-            first_existing = f"{base_name.rstrip('.json')}{bracket_part}.json"
-
-            if first_existing not in jsons:
-                print(f'{file_path} does not appear to have a JSON file')
-                return
-
-        else:
-            print(f'{file_path} does not appear to have a JSON file')
-            return
+        print(f'{original_path} does not appear to have a JSON file')
+        return
+        
 
     json_exif, json_meta = extract_json_exif(first_existing, jsons)
 
