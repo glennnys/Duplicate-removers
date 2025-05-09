@@ -367,11 +367,11 @@ class HashStorage:
     
 
     ### This function is used to copy the file to the destination folder and perform the metadata extraction
-    def copy_file(self, file_path, file, dest_folder):
+    def copy_file(self, file_path, file, dest_folder, higher_res=False):
         # if duplicates shouldn't be moved, return
-        if self.data_handling in ["2", "4"] and dest_folder != self.new_dest: return
+        if self.data_handling in ["2", "4"] and dest_folder != self.new_dest and not higher_res: return
 
-        if self.data_handling in ["5"]:
+        if self.data_handling in ["5"] and not higher_res:
             if dest_folder != self.new_dest:
                 # if it is a duplicate. remove it
                 try:
@@ -386,8 +386,10 @@ class HashStorage:
                     pe.process_file(file_path, file_path, self.json_files, self.logger, file, self.json_handling)
                 
                 return file_path
-      
-        file_name = os.path.relpath(file_path, start=self.new_folder)
+        if higher_res:
+            file_name = os.path.relpath(file_path, start=self.dupe_dest)
+        else:
+            file_name = os.path.relpath(file_path, start=self.new_folder)
         dest_path = os.path.join(dest_folder, file_name)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
@@ -396,12 +398,12 @@ class HashStorage:
 
         try:
             #copy or move it
-            if self.data_handling in ["1", "2"]:
+            if self.data_handling in ["1", "2"] and not higher_res:
                 os.makedirs(dest_folder, exist_ok=True)
                 with open(file_path, 'rb') as src, open(dest_path, 'wb') as dest:
                     dest.write(src.read())
 
-            elif self.data_handling in ["3", "4"]:
+            elif self.data_handling in ["3", "4"] or higher_res:
                 os.makedirs(dest_folder, exist_ok=True)
                 os.rename(file_path, dest_path)
 

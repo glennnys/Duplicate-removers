@@ -23,16 +23,16 @@ pillow_heif.register_heif_opener()
 ################################## Helper functions ##################################
 def show_comparison_dialog(window, paths):
 
-    def select_all(bool=True):
+    def select_all(value=1):
          for i in range(len(selection_vars)):
-              selection_vars[i].set(bool)
+              selection_vars[i].set(value)
          
     def on_closing(save_selection=False):
         for i in range(len(selection_vars)):
             if save_selection:
                 selection[i] = selection_vars[i].get()
             else:
-                    selection[i] = False
+                    selection[i] = 0
 
             # Unbind mousewheel to prevent callbacks after widget is destroyed
         if platform.system() == 'Windows' or platform.system() == 'MAC':
@@ -59,8 +59,8 @@ def show_comparison_dialog(window, paths):
         old_paths, new_paths = zip(*paths)
     else: return
     
-    selection_vars = [BooleanVar(value=False) for _ in old_paths]
-    selection = [False] * len(old_paths)
+    selection_vars = [IntVar(value=0) for _ in old_paths]
+    selection = [0] * len(old_paths)
     root = Toplevel(window)  # Create a new window
     root.title("Duplicate Image Comparison")
 
@@ -75,11 +75,13 @@ def show_comparison_dialog(window, paths):
     buttons_frame = ttk.Frame(stationary_frame)
     buttons_frame.pack(pady=10)
 
-    select_all_button = ttk.Button(buttons_frame, text="Select all", command=lambda: select_all(True))
-    deselect_all_button = ttk.Button(buttons_frame, text="Deselect all", command=lambda: select_all(False))
+    deselect_all_button = ttk.Button(buttons_frame, text="Select all old", command=lambda: select_all(0))
+    select_all_button = ttk.Button(buttons_frame, text="Select all new", command=lambda: select_all(1))
+    both_all_button = ttk.Button(buttons_frame, text="Select all both", command=lambda: select_all(2))
     confirm_button = ttk.Button(buttons_frame, text="Confirm", command=lambda: on_closing(True))
-    select_all_button.pack(side='left',padx=10)
     deselect_all_button.pack(side='left',padx=10)
+    select_all_button.pack(side='left',padx=10)
+    both_all_button.pack(side='left',padx=10)
     confirm_button.pack(side='left',padx=10)
 
     label_frame = ttk.Frame(stationary_frame)
@@ -116,7 +118,6 @@ def show_comparison_dialog(window, paths):
     for i in range(len(old_paths)):
         old_path = old_paths[i]
         new_path = new_paths[i]
-        print(old_path, new_path)
         selection_frame = ttk.Frame(mainframe)
         selection_frame.pack()
         
@@ -124,8 +125,12 @@ def show_comparison_dialog(window, paths):
         # Check if the file is a video or an image
         try:
             # Handle image
-            img1 = PILImage.open(old_path).resize((400, 400))
-            img2 = PILImage.open(new_path).resize((400, 400))
+            img1 = PILImage.open(old_path)
+            res1 = img1.size
+            img1 = img1.resize((400, 400))
+            img2 = PILImage.open(new_path)
+            res2 = img2.size
+            img2= img2.resize((400, 400))
 
         except:
             # Handle video: extract the first frame as an image
@@ -136,11 +141,17 @@ def show_comparison_dialog(window, paths):
             video1.release()
             video2.release()
             if success:
-                img1 = PILImage.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB)).resize((400, 400))
-                img2 = PILImage.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB)).resize((400, 400))
+                img1 = PILImage.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
+                res1 = img1.size
+                img1 = img1.resize((400, 400))
+                img2 = PILImage.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
+                res2 = img2.size
+                img2= img2.resize((400, 400))
             else:
                 img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                res1 = img1.size
                 img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                res2 = img2.size
 
           
 
@@ -153,30 +164,45 @@ def show_comparison_dialog(window, paths):
         left_image_frame = Frame(selection_frame)
         left_image_frame.pack(side="left")
         
-        # Radiobutton for False
-        false_button = ttk.Radiobutton(
+        # Radiobutton for Old
+        old_button = ttk.Radiobutton(
             left_image_frame,
             image=tk_img1,
             variable=selection_vars[i],
-            value=False
+            value=0
         )
-        false_button.pack(padx=10, pady=10)
+        old_button.pack(padx=10, pady=10)
 
-        ttk.Label(left_image_frame, text=old_path).pack()
+        ttk.Label(left_image_frame, text=old_path).pack(padx=20)
+        ttk.Label(left_image_frame, text=f'resolution: ({res1[0]}x{res1[1]})').pack(padx=20)
 
         right_image_frame = Frame(selection_frame)
-        right_image_frame.pack(side="right")
+        right_image_frame.pack(side="left")
 
-        # Radiobutton for True
-        true_button = ttk.Radiobutton(
+        # Radiobutton for New
+        new_button = ttk.Radiobutton(
             right_image_frame,
             image=tk_img2,
             variable=selection_vars[i],
-            value=True
+            value=1
         )
-        true_button.pack(padx=10, pady=10)
+        new_button.pack(padx=10, pady=10)
 
-        ttk.Label(right_image_frame, text=new_path).pack()
+        ttk.Label(right_image_frame, text=new_path).pack(padx=20)
+        ttk.Label(right_image_frame, text=f'resolution: ({res2[0]}x{res2[1]})').pack(padx=20)
+
+        both_frame = Frame(selection_frame)
+        both_frame.pack(side="left")
+        
+         # Radiobutton for True
+        both_button = ttk.Radiobutton(
+            both_frame,
+            text="Both",
+            variable=selection_vars[i],
+            value=2
+        )
+        both_button.pack(padx=10, pady=10)
+        
 
     root.update()
 
@@ -191,8 +217,10 @@ def show_comparison_dialog(window, paths):
     root.wait_window()  # Wait for the dialog to close
 
     for result in zip(selection, old_paths, new_paths):
-            if result[0]:
+            if result[0] == 1:
                 seen_hashes.swap_files(result[1], result[2])
+            elif result[0] == 2:
+                seen_hashes.copy_file(result[2], None, seen_hashes.new_dest, True)
 
 
 ################################## Main processing function ##################################
@@ -450,13 +478,16 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
 
-    print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {100*(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes} speed up.")
+    print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {100*(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes:.1f}% speed up.")
     print(f"{len(seen_hashes.higher_res)} images or videos have a higher resolution than their pre-existing counterpart")
 
     print("total: ", logger.get_time())
     print("avg: ", logger.get_time(avg=True))
 
-    window.after(0, show_comparison_dialog, window, seen_hashes.higher_res)
+    images_per_window = 30
+    for i in range(0, len(seen_hashes.higher_res), images_per_window):
+        end = i+images_per_window if i+images_per_window < len(seen_hashes.higher_res) else len(seen_hashes.higher_res)
+        window.after(0, show_comparison_dialog, window, seen_hashes.higher_res[i:end])
 
     processing_complete.set()  # Set flag to indicate completion
 
