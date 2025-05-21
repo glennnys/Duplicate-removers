@@ -347,7 +347,7 @@ class HashStorage:
             destination = self.new_dest
 
         elif result[3] == "high-res duplicate":
-            destination = self.dupe_dest
+            destination = self.high_res_dupe_dest
         else:
             destination = self.err_dest
 
@@ -371,6 +371,8 @@ class HashStorage:
         # if duplicates shouldn't be moved, return
         if self.data_handling in ["2", "4"] and dest_folder != self.new_dest and not higher_res: return
 
+        if self.data_handling in ["6"] and dest_folder not in [self.dupe_dest, self.high_res_dupe_dest]: return
+
         if self.data_handling in ["5"] and not higher_res:
             if dest_folder != self.new_dest:
                 # if it is a duplicate. remove it
@@ -387,7 +389,7 @@ class HashStorage:
                 
                 return file_path
         if higher_res:
-            file_name = os.path.relpath(file_path, start=self.dupe_dest)
+            file_name = os.path.relpath(file_path, start=self.high_res_dupe_dest)
         else:
             file_name = os.path.relpath(file_path, start=self.new_folder)
         dest_path = os.path.join(dest_folder, file_name)
@@ -403,7 +405,7 @@ class HashStorage:
                 with open(file_path, 'rb') as src, open(dest_path, 'wb') as dest:
                     dest.write(src.read())
 
-            elif self.data_handling in ["3", "4"] or higher_res:
+            elif self.data_handling in ["3", "4", "6"] or higher_res:
                 os.makedirs(dest_folder, exist_ok=True)
                 os.rename(file_path, dest_path)
 
@@ -494,16 +496,19 @@ class HashStorage:
         if data_handling not in ["5"]:
             new_dest = os.path.normpath(os.path.join(folder3, "!New"))
             dupe_dest = os.path.normpath(os.path.join(folder3, "!Duplicate"))
+            high_res_dupe_dest = os.path.normpath(os.path.join(folder3, "!Higher res duplicate"))
             err_dest = os.path.normpath(os.path.join(folder3, "!Error"))
 
         else:
             new_dest = "new"
             dupe_dest = "dupe"
+            high_res_dupe_dest = "hrdupe"
             err_dest = "err"
         
 
         self.new_dest = new_dest
         self.dupe_dest = dupe_dest
+        self.high_res_dupe_dest = high_res_dupe_dest
         self.err_dest = err_dest
         self.existing_folder = folder1
         self.new_folder = folder2

@@ -2,7 +2,7 @@ import os
 import ctypes
 import time
 from PIL import Image as PILImage
-from PIL import ImageTk  # Ensure PIL.Image is imported for image operations
+from PIL import ImageTk, ExifTags  # Ensure PIL.Image is imported for image operations
 import pillow_heif
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -17,15 +17,70 @@ import platform
 import cv2
 import json
 import logkeeper
+import math
 
 pillow_heif.register_heif_opener()
 
 ################################## Helper functions ##################################
-def show_comparison_dialog(window, paths):
+def show_comparison_dialog(window, paths, logger):
 
     def select_all(value=1):
          for i in range(len(selection_vars)):
               selection_vars[i].set(value)
+
+    def prev_next(value=0):
+        nonlocal active_page
+        nonlocal root
+        
+        if value == 0 and active_page != 0:
+            pages[active_page].pack_forget()
+            active_page -= 1
+            pages[active_page].pack(fill=BOTH, side=LEFT, expand=True)
+
+        elif value == 1 and active_page != page_count-1:
+            pages[active_page].pack_forget()
+            active_page += 1
+            pages[active_page].pack(fill=BOTH, side=LEFT, expand=True)
+            
+        page_counter.config(text=f"Page {active_page+1}/{page_count}")
+
+        root.update()
+        scrollbar.config(command=pages[active_page].yview)
+        pages[active_page].configure(scrollregion=pages[active_page].bbox("all"))
+        pages[active_page].configure(width=mainframe.winfo_width())
+
+        # start the canvas at the top
+        pages[active_page].yview_moveto(0)
+        pages[active_page].xview_moveto(0)
+
+    def resize_with_orientation(img, max_width):
+        # Step 1: Apply EXIF orientation
+        try:
+            for orientation in ExifTags.TAGS.keys():
+                if ExifTags.TAGS[orientation] == 'Orientation':
+                    break
+
+            exif = img._getexif()
+            if exif is not None:
+                orientation_value = exif.get(orientation)
+
+                if orientation_value == 3:
+                    img = img.rotate(180, expand=True)
+                elif orientation_value == 6:
+                    img = img.rotate(270, expand=True)
+                elif orientation_value == 8:
+                    img = img.rotate(90, expand=True)
+        except (AttributeError, KeyError, IndexError):
+            # No EXIF data or orientation tag
+            pass
+
+        # Step 2: Resize
+        size = img.size
+        new_size = (max_width, int(size[1]*(max_width/size[0])))
+        img = img.resize(new_size)
+
+        return img
+        
          
     def on_closing(save_selection=False):
         for i in range(len(selection_vars)):
@@ -51,13 +106,25 @@ def show_comparison_dialog(window, paths):
 
 
      ### canvas part ###
-    def on_mousewheel_windows(event):     scroll_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-    def on_mousewheel_linux_up(event):    scroll_canvas.yview_scroll(-1, "units")
-    def on_mousewheel_linux_down(event):  scroll_canvas.yview_scroll(1, "units")
+    def on_mousewheel_windows(event):   
+        nonlocal active_page  
+        pages[active_page].yview_scroll(int(-1*(event.delta/120)), "units")
+    def on_mousewheel_linux_up(event):    
+        nonlocal active_page
+        pages[active_page].yview_scroll(-1, "units")
+    def on_mousewheel_linux_down(event):  
+        nonlocal active_page
+        pages[active_page].yview_scroll(1, "units")
 
     if len(paths)>0:
         old_paths, new_paths = zip(*paths)
     else: return
+
+    images_per_page = 30
+    active_page = 0
+    page_count = math.ceil(len(paths)/images_per_page)
+    pages = []
+    images = [] # prevent garbage collection
     
     selection_vars = [IntVar(value=0) for _ in old_paths]
     selection = [0] * len(old_paths)
@@ -84,6 +151,16 @@ def show_comparison_dialog(window, paths):
     both_all_button.pack(side='left',padx=10)
     confirm_button.pack(side='left',padx=10)
 
+    next_prev_frame = ttk.Frame(stationary_frame)
+    next_prev_frame.pack(pady=10)
+
+    prev_button = ttk.Button(next_prev_frame, text="Previous", command=lambda: prev_next(0))
+    next_button = ttk.Button(next_prev_frame, text="Next", command=lambda: prev_next(1))
+    page_counter = ttk.Label(next_prev_frame, text=f"page 1/{page_count}")
+    prev_button.pack(side='left',padx=10)
+    next_button.pack(side='left',padx=10)
+    page_counter.pack(side='left',padx=10)
+
     label_frame = ttk.Frame(stationary_frame)
     label_frame.pack(pady=10)
 
@@ -92,135 +169,144 @@ def show_comparison_dialog(window, paths):
     new_label = ttk.Label(label_frame, text="new image, higher resolution")
     new_label.pack(side="right", padx=100)
 
-    canvas_frame = ttk.Frame(root)
-    canvas_frame.pack(fill=Y, expand=True)
-
-    scroll_canvas = Canvas(canvas_frame, takefocus=False, highlightthickness=0)
-    scroll_canvas.pack(fill=BOTH, side=LEFT, expand=True)
-
-    scrollbar = ttk.Scrollbar(canvas_frame,
-                        orient=VERTICAL, 
-                        command=scroll_canvas.yview)
+    canvas = ttk.Frame(root)
+    canvas.pack(fill=Y, expand=True)
+    scrollbar = ttk.Scrollbar(canvas,
+                            orient=VERTICAL)
     scrollbar.pack(side=RIGHT, fill=Y)
+    
+    for p in range(page_count):
 
-    scroll_canvas.configure(yscrollcommand=scrollbar.set)
+        pages.append(Canvas(canvas, takefocus=False, highlightthickness=0))
+        pages[p].pack(fill=BOTH, side=LEFT, expand=True)
 
-    enable_scroll()
-
-    # Mainframe
-    mainframe = ttk.Frame(scroll_canvas, takefocus=False)
-    mainframe.pack(fill=BOTH, side=LEFT)
-    scroll_canvas.create_window((0, 0), window=mainframe, anchor=NW)
-
-    mainframe.bind("<FocusIn>", lambda e: mainframe.focus_set())
-    images = []
-
-    for i in range(len(old_paths)):
-        old_path = old_paths[i]
-        new_path = new_paths[i]
-        selection_frame = ttk.Frame(mainframe)
-        selection_frame.pack()
         
 
-        # Check if the file is a video or an image
-        try:
-            # Handle image
-            img1 = PILImage.open(old_path)
-            res1 = img1.size
-            img1 = img1.resize((400, 400))
-            img2 = PILImage.open(new_path)
-            res2 = img2.size
-            img2= img2.resize((400, 400))
+        pages[p].configure(yscrollcommand=scrollbar.set)
 
-        except:
-            # Handle video: extract the first frame as an image
-            video1 = cv2.VideoCapture(old_path)
-            video2 = cv2.VideoCapture(new_path)
-            success, frame1 = video1.read()
-            success, frame2 = video2.read()
-            video1.release()
-            video2.release()
-            if success:
-                img1 = PILImage.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
+        enable_scroll()
+
+        # Mainframe
+        mainframe = ttk.Frame(pages[p], takefocus=False)
+        mainframe.pack(fill=BOTH, side=LEFT)
+        pages[p].create_window((0, 0), window=mainframe, anchor=NW)
+
+        mainframe.bind("<FocusIn>", lambda e, a=p: pages[a].focus_set())
+
+        end = min(len(old_paths), (p+1)*images_per_page)
+        for i in range(p*images_per_page, end):
+            selection_frame = ttk.Frame(mainframe)
+            selection_frame.pack()
+
+            old_path = old_paths[i]
+            new_path = new_paths[i]
+            
+            start = time.time()
+            # Check if the file is a video or an image
+            try:
+                # Handle image
+                img1 = PILImage.open(old_path)
                 res1 = img1.size
-                img1 = img1.resize((400, 400))
-                img2 = PILImage.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
+                img1 = resize_with_orientation(img1, 400)
+                img2 = PILImage.open(new_path)
                 res2 = img2.size
-                img2= img2.resize((400, 400))
-            else:
-                img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
-                res1 = img1.size
-                img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
-                res2 = img2.size
+                img2 = resize_with_orientation(img2, 400)
+                
+            except:
+                try:
+                    # Handle video: extract the first frame as an image
+                    video1 = cv2.VideoCapture(old_path)
+                    video2 = cv2.VideoCapture(new_path)
+                    success, frame1 = video1.read()
+                    success, frame2 = video2.read()
+                    video1.release()
+                    video2.release()
+                    if success:
+                        img1 = PILImage.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
+                        res1 = img1.size
+                        img1 = resize_with_orientation(img1, 400)
+                        img2 = PILImage.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
+                        res2 = img2.size
+                        img2= resize_with_orientation(img2, 400)
+                    else:
+                        img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                        res1 = img1.size
+                        img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                        res2 = img2.size
+                except:
+                    img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                    res1 = img1.size
+                    img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                    res2 = img2.size
+  
 
-          
+            tk_img1 = ImageTk.PhotoImage(img1)
+            tk_img2 = ImageTk.PhotoImage(img2)
+            logger.add_time(time.time()-start, "Opening and resizing image for displaying")
+            start = time.time()
 
-        tk_img1 = ImageTk.PhotoImage(img1)
-        tk_img2 = ImageTk.PhotoImage(img2)
+            images.append(tk_img1)
+            images.append(tk_img2)
+            
+            left_frame = Frame(selection_frame)
+            left_frame.pack(side="left")
+            
+            # Radiobutton for Old
+            old_button = ttk.Radiobutton(
+                left_frame,
+                image=tk_img1,
+                variable=selection_vars[i],
+                value=0
+            )
+            old_button.pack(padx=10, pady=10)
 
-        images.append(tk_img1)
-        images.append(tk_img2)
+            ttk.Label(left_frame, text=old_path, wraplength=400).pack(padx=20)
+            ttk.Label(left_frame, text=f'resolution: ({res1[0]}x{res1[1]})').pack(padx=20)
+
+            right_frame = Frame(selection_frame)
+            right_frame.pack(side="left")
+
+            # Radiobutton for New
+            new_button = ttk.Radiobutton(
+                right_frame,
+                image=tk_img2,
+                variable=selection_vars[i],
+                value=1
+            )
+            new_button.pack(padx=10, pady=10)
+
+            ttk.Label(right_frame, text=new_path, wraplength=400).pack(padx=20)
+            ttk.Label(right_frame, text=f'resolution: ({res2[0]}x{res2[1]})').pack(padx=20)
+
+            both_frame = Frame(selection_frame)
+            both_frame.pack(side="left")
+            
+            # Radiobutton for True
+            both_button = ttk.Radiobutton(
+                both_frame,
+                text="Both",
+                variable=selection_vars[i],
+                value=2
+            )
+            both_button.pack(padx=10, pady=10)
+
+            logger.add_time(time.time()-start, "Generating buttons and stuff")
+
+        if p != 0:
+            pages[p].pack_forget()
         
-        left_image_frame = Frame(selection_frame)
-        left_image_frame.pack(side="left")
-        
-        # Radiobutton for Old
-        old_button = ttk.Radiobutton(
-            left_image_frame,
-            image=tk_img1,
-            variable=selection_vars[i],
-            value=0
-        )
-        old_button.pack(padx=10, pady=10)
-
-        ttk.Label(left_image_frame, text=old_path).pack(padx=20)
-        ttk.Label(left_image_frame, text=f'resolution: ({res1[0]}x{res1[1]})').pack(padx=20)
-
-        right_image_frame = Frame(selection_frame)
-        right_image_frame.pack(side="left")
-
-        # Radiobutton for New
-        new_button = ttk.Radiobutton(
-            right_image_frame,
-            image=tk_img2,
-            variable=selection_vars[i],
-            value=1
-        )
-        new_button.pack(padx=10, pady=10)
-
-        ttk.Label(right_image_frame, text=new_path).pack(padx=20)
-        ttk.Label(right_image_frame, text=f'resolution: ({res2[0]}x{res2[1]})').pack(padx=20)
-
-        both_frame = Frame(selection_frame)
-        both_frame.pack(side="left")
-        
-         # Radiobutton for True
-        both_button = ttk.Radiobutton(
-            both_frame,
-            text="Both",
-            variable=selection_vars[i],
-            value=2
-        )
-        both_button.pack(padx=10, pady=10)
-        
-
-    root.update()
-
-    scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
-    scroll_canvas.configure(width=mainframe.winfo_width())
-
-    # start the canvas at the top
-    scroll_canvas.yview_moveto(0)
-    scroll_canvas.xview_moveto(0)
-
+    prev_next(0)
 
     root.wait_window()  # Wait for the dialog to close
 
     for result in zip(selection, old_paths, new_paths):
-            if result[0] == 1:
-                seen_hashes.swap_files(result[1], result[2])
-            elif result[0] == 2:
-                seen_hashes.copy_file(result[2], None, seen_hashes.new_dest, True)
+        if result[0] == 1:
+            seen_hashes.swap_files(result[1], result[2])
+        elif result[0] == 2:
+            seen_hashes.copy_file(result[2], None, seen_hashes.new_dest, True)
+
+    print("total: ", logger.get_time())
+    print("avg: ", logger.get_time(avg=True))
 
 
 ################################## Main processing function ##################################
@@ -478,16 +564,17 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
 
-    print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {100*(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes:.1f}% speed up.")
+    progress = 0
+    process = "Finished finding duplicates, opening selection window"
+
+    if seen_hashes.checked_nodes>0:
+        print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes:.1f}x speed up.")
     print(f"{len(seen_hashes.higher_res)} images or videos have a higher resolution than their pre-existing counterpart")
+
+    window.after(0, show_comparison_dialog, window, seen_hashes.higher_res, logger)
 
     print("total: ", logger.get_time())
     print("avg: ", logger.get_time(avg=True))
-
-    images_per_window = 30
-    for i in range(0, len(seen_hashes.higher_res), images_per_window):
-        end = i+images_per_window if i+images_per_window < len(seen_hashes.higher_res) else len(seen_hashes.higher_res)
-        window.after(0, show_comparison_dialog, window, seen_hashes.higher_res[i:end])
 
     processing_complete.set()  # Set flag to indicate completion
 
@@ -506,7 +593,7 @@ def on_closing(only_stop_threads=False):
 
     # Wait for the thread to finish
     if processing_thread is not None and processing_thread.is_alive():
-        processing_thread.join(timeout=5)
+        processing_thread.join(timeout=15)
     
     if not only_stop_threads:
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
@@ -622,7 +709,7 @@ def on_folder3_selected(path):
 def on_folder_selected():
     global total_size
 
-    if data_handling_var.get() in ["3", "4"]:
+    if data_handling_var.get() in ["3", "4", "6"]:
         label4.config(text=f"No additional space will be taken up on the disk.")
     
     elif data_handling_var.get() in ["5"]:
@@ -709,6 +796,7 @@ def update_radiobuttons(*args):
                                 "Copy new files" : "2",
                                 "Move all files" : "3",
                                 "Move new files" : "4",
+                                "Move duplicates": "6",
                                 "Keep new files (duplicates will be deleted)" : "5"}
         data_handling_var.set("1")
         
@@ -837,6 +925,7 @@ type_select_var.set("1")
 delete_jsons_var = BooleanVar()
 delete_jsons_check = ttk.Checkbutton(radio_frame, text="Delete json files after metadata extraction", variable=delete_jsons_var)
 delete_jsons_check.pack(side=LEFT,pady=5)
+delete_jsons_check.pack_forget()
 
 # buttons
 
@@ -862,6 +951,10 @@ def toggle_meta():
     global extract_meta
     extract_meta = not extract_meta
     enable_meta_button.config(text="Disable metadata extraction" if extract_meta else "Enable metadata extraction")
+    if extract_meta:
+        delete_jsons_check.pack(side=LEFT,pady=5)
+    else:
+        delete_jsons_check.pack_forget()
 
 extract_meta = False
 enable_meta_button = Button(buttons_frame, text="Enable metadata extraction", font=big_font, command=toggle_meta)
