@@ -22,7 +22,8 @@ import math
 pillow_heif.register_heif_opener()
 
 ################################## Helper functions ##################################
-def show_comparison_dialog(window, paths, logger):
+def show_comparison_dialog(window, paths, logger, stop_event):
+    global processing_complete
 
     def select_all(value=1):
          for i in range(len(selection_vars)):
@@ -31,23 +32,40 @@ def show_comparison_dialog(window, paths, logger):
     def prev_next(value=0):
         nonlocal active_page
         nonlocal root
-        
-        if value == 0 and active_page != 0:
-            pages[active_page].pack_forget()
-            active_page -= 1
-            pages[active_page].pack(fill=BOTH, side=LEFT, expand=True)
+        nonlocal loaded_pages
 
-        elif value == 1 and active_page != page_count-1:
+        if stop_event.is_set():
+            return
+        
+        # Determine the target page
+        target_page = active_page
+        if value == 0 and active_page > 0:
+            target_page -= 1
+        elif value == 1 and active_page < page_count - 1:
+            target_page += 1# No more pages in that direction
+
+        # If the page is loading, retry after a short delay
+        if loading_pages[target_page]:
+            root.after(200, lambda: prev_next(value))
+            return
+
+        # If the page hasn't been loaded, start loading it
+        if not loaded_pages[target_page]:
+            load_page_images(target_page)
+            root.after(200, lambda: prev_next(value))  # Retry once loading starts
+            return
+
+        # Page is ready — switch to it
+        if target_page != active_page:
             pages[active_page].pack_forget()
-            active_page += 1
-            pages[active_page].pack(fill=BOTH, side=LEFT, expand=True)
-            
-        page_counter.config(text=f"Page {active_page+1}/{page_count}")
+            active_page = target_page
+            pages[active_page].pack(fill=BOTH, side=LEFT, expand=True)     
+            page_counter.config(text=f"Page {active_page+1}/{page_count}")
 
         root.update()
         scrollbar.config(command=pages[active_page].yview)
         pages[active_page].configure(scrollregion=pages[active_page].bbox("all"))
-        pages[active_page].configure(width=mainframe.winfo_width())
+        pages[active_page].configure(width=mainframes[active_page].winfo_width())
 
         # start the canvas at the top
         pages[active_page].yview_moveto(0)
@@ -123,7 +141,10 @@ def show_comparison_dialog(window, paths, logger):
     images_per_page = 30
     active_page = 0
     page_count = math.ceil(len(paths)/images_per_page)
-    pages = []
+    pages = [ttk.Frame()]*page_count
+    mainframes = [ttk.Frame()]*page_count
+    loaded_pages = [False]*page_count
+    loading_pages = [False]*page_count
     images = [] # prevent garbage collection
     
     selection_vars = [IntVar(value=0) for _ in old_paths]
@@ -132,6 +153,8 @@ def show_comparison_dialog(window, paths, logger):
     root.title("Duplicate Image Comparison")
 
     root.protocol("WM_DELETE_WINDOW", lambda: on_closing(False))
+
+    enable_scroll()
 
     stationary_frame = ttk.Frame(root)
     stationary_frame.pack()
@@ -157,9 +180,11 @@ def show_comparison_dialog(window, paths, logger):
     prev_button = ttk.Button(next_prev_frame, text="Previous", command=lambda: prev_next(0))
     next_button = ttk.Button(next_prev_frame, text="Next", command=lambda: prev_next(1))
     page_counter = ttk.Label(next_prev_frame, text=f"page 1/{page_count}")
+    loading_label = ttk.Label(stationary_frame, text="")
     prev_button.pack(side='left',padx=10)
     next_button.pack(side='left',padx=10)
     page_counter.pack(side='left',padx=10)
+    loading_label.place(x=500, y=145)
 
     label_frame = ttk.Frame(stationary_frame)
     label_frame.pack(pady=10)
@@ -175,78 +200,100 @@ def show_comparison_dialog(window, paths, logger):
                             orient=VERTICAL)
     scrollbar.pack(side=RIGHT, fill=Y)
     
-    for p in range(page_count):
+    def load_page_images(page_index):
+        nonlocal loaded_pages
+        nonlocal loading_pages
 
-        pages.append(Canvas(canvas, takefocus=False, highlightthickness=0))
-        pages[p].pack(fill=BOTH, side=LEFT, expand=True)
+        if loading_pages[page_index] or loaded_pages[page_index]:
+            return
 
-        
+        loading_label.config(text=f"Loading page {page_index+1}")
 
-        pages[p].configure(yscrollcommand=scrollbar.set)
-
-        enable_scroll()
-
-        # Mainframe
-        mainframe = ttk.Frame(pages[p], takefocus=False)
-        mainframe.pack(fill=BOTH, side=LEFT)
-        pages[p].create_window((0, 0), window=mainframe, anchor=NW)
-
-        mainframe.bind("<FocusIn>", lambda e, a=p: pages[a].focus_set())
-
-        end = min(len(old_paths), (p+1)*images_per_page)
-        for i in range(p*images_per_page, end):
-            selection_frame = ttk.Frame(mainframe)
-            selection_frame.pack()
-
-            old_path = old_paths[i]
-            new_path = new_paths[i]
-            
-            start = time.time()
-            # Check if the file is a video or an image
-            try:
-                # Handle image
-                img1 = PILImage.open(old_path)
-                res1 = img1.size
-                img1 = resize_with_orientation(img1, 400)
-                img2 = PILImage.open(new_path)
-                res2 = img2.size
-                img2 = resize_with_orientation(img2, 400)
-                
-            except:
+        loading_pages[page_index] = True
+        def background():
+            # heavy lifting happens here
+            prepared_widgets = []
+            for i in range(page_index * images_per_page, min(len(old_paths), (page_index + 1) * images_per_page)):
+                if stop_event.is_set():
+                    return
+                old_path = old_paths[i]
+                new_path = new_paths[i]
+                # your image loading and resizing logic
+                # but store widget creation details in a list
                 try:
-                    # Handle video: extract the first frame as an image
-                    video1 = cv2.VideoCapture(old_path)
-                    video2 = cv2.VideoCapture(new_path)
-                    success, frame1 = video1.read()
-                    success, frame2 = video2.read()
-                    video1.release()
-                    video2.release()
-                    if success:
-                        img1 = PILImage.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
-                        res1 = img1.size
-                        img1 = resize_with_orientation(img1, 400)
-                        img2 = PILImage.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
-                        res2 = img2.size
-                        img2= resize_with_orientation(img2, 400)
-                    else:
+                    # Handle image
+                    img1 = PILImage.open(old_path)
+                    res1 = img1.size
+                    img1 = resize_with_orientation(img1, 400)
+                    img2 = PILImage.open(new_path)
+                    res2 = img2.size
+                    img2 = resize_with_orientation(img2, 400)
+                    
+                except:
+                    try:
+                        # Handle video: extract the first frame as an image
+                        video1 = cv2.VideoCapture(old_path)
+                        video2 = cv2.VideoCapture(new_path)
+                        success, frame1 = video1.read()
+                        success, frame2 = video2.read()
+                        video1.release()
+                        video2.release()
+                        if success:
+                            img1 = PILImage.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
+                            res1 = img1.size
+                            img1 = resize_with_orientation(img1, 400)
+                            img2 = PILImage.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
+                            res2 = img2.size
+                            img2= resize_with_orientation(img2, 400)
+                        else:
+                            img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                            res1 = img1.size
+                            img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                            res2 = img2.size
+                    except:
                         img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
                         res1 = img1.size
                         img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
                         res2 = img2.size
-                except:
-                    img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
-                    res1 = img1.size
-                    img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
-                    res2 = img2.size
-  
+    
 
-            tk_img1 = ImageTk.PhotoImage(img1)
-            tk_img2 = ImageTk.PhotoImage(img2)
-            logger.add_time(time.time()-start, "Opening and resizing image for displaying")
-            start = time.time()
+                tk_img1 = ImageTk.PhotoImage(img1)
+                tk_img2 = ImageTk.PhotoImage(img2)
 
-            images.append(tk_img1)
-            images.append(tk_img2)
+                images.append(tk_img1)
+                images.append(tk_img2)
+                prepared_widgets.append((tk_img1, tk_img2, res1, res2, old_path, new_path))  # Store relevant UI elements
+
+            # Now schedule UI update on main thread
+            root.after(0, display_page_images, page_index, prepared_widgets)
+
+        threading.Thread(target=background).start()
+
+    def display_page_images(page_index, widgets):
+        nonlocal loaded_pages
+        nonlocal loading_pages
+
+        if stop_event.is_set():
+            return
+        # Actually create and pack widgets on the UI
+        pages[page_index] = Canvas(canvas, takefocus=False, highlightthickness=0)
+        pages[page_index].pack(fill=BOTH, side=LEFT, expand=True)
+
+        pages[page_index].configure(yscrollcommand=scrollbar.set)
+
+        # Mainframe
+        mainframes[page_index] = ttk.Frame(pages[page_index], takefocus=False)
+        mainframes[page_index].pack(fill=BOTH, side=LEFT)
+        pages[page_index].create_window((0, 0), window=mainframes[page_index], anchor=NW)
+
+        mainframes[page_index].bind("<FocusIn>", lambda e, a=page_index: pages[a].focus_set())
+
+        i = page_index*images_per_page
+        for tk_img1, tk_img2, res1, res2, old_path, new_path in widgets:
+            selection_frame = ttk.Frame(mainframes[page_index])
+            selection_frame.pack()
+            
+            # Check if the file is a video or an image
             
             left_frame = Frame(selection_frame)
             left_frame.pack(side="left")
@@ -290,11 +337,18 @@ def show_comparison_dialog(window, paths, logger):
             )
             both_button.pack(padx=10, pady=10)
 
-            logger.add_time(time.time()-start, "Generating buttons and stuff")
+            i+=1
 
-        if p != 0:
-            pages[p].pack_forget()
+        if active_page != page_index:
+            pages[page_index].pack_forget()
         
+        loading_label.config(text=f"")
+        loaded_pages[page_index] = True
+        loading_pages[page_index] = False
+
+        if page_index + 1 < page_count - 1 and not (loaded_pages[page_index + 1] or loading_pages[page_index + 1]):
+            root.after(1000, lambda: load_page_images(page_index + 1))
+         
     prev_next(0)
 
     root.wait_window()  # Wait for the dialog to close
@@ -305,8 +359,7 @@ def show_comparison_dialog(window, paths, logger):
         elif result[0] == 2:
             seen_hashes.copy_file(result[2], None, seen_hashes.new_dest, True)
 
-    print("total: ", logger.get_time())
-    print("avg: ", logger.get_time(avg=True))
+    processing_complete.set()
 
 
 ################################## Main processing function ##################################
@@ -571,12 +624,13 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
         print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes:.1f}x speed up.")
     print(f"{len(seen_hashes.higher_res)} images or videos have a higher resolution than their pre-existing counterpart")
 
-    window.after(0, show_comparison_dialog, window, seen_hashes.higher_res, logger)
+    window.after(20, show_comparison_dialog, window, seen_hashes.higher_res, logger, stop_event)
 
     print("total: ", logger.get_time())
     print("avg: ", logger.get_time(avg=True))
 
-    processing_complete.set()  # Set flag to indicate completion
+    if (len(seen_hashes.higher_res)==0):
+        processing_complete.set()  # Set flag to indicate completion
 
 ################################## GUI ##################################
 total_size = 0
