@@ -18,12 +18,16 @@ import cv2
 import json
 import logkeeper
 import math
+import hashlib
 
 pillow_heif.register_heif_opener()
 
 ################################## Helper functions ##################################
 def show_comparison_dialog(window, paths, logger, stop_event):
     global processing_complete
+
+    if stop_event.is_set():
+        return
 
     def select_all(value=1):
          for i in range(len(selection_vars)):
@@ -619,6 +623,8 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
 
     progress = 0
     process = "Finished finding duplicates, opening selection window"
+    i = None
+    total = None
 
     if seen_hashes.checked_nodes>0:
         print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes:.1f}x speed up.")
@@ -629,7 +635,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
     print("total: ", logger.get_time())
     print("avg: ", logger.get_time(avg=True))
 
-    if (len(seen_hashes.higher_res)==0):
+    if len(seen_hashes.higher_res)==0 or stop_event.is_set():
         processing_complete.set()  # Set flag to indicate completion
 
 ################################## GUI ##################################
