@@ -43,6 +43,8 @@ class HashStorage:
         self.higher_res = []
         self.checked_nodes = 0
 
+        self.verified = {}
+
 
     def save_items(self):
         if self.existing_folder == "": return
@@ -369,9 +371,13 @@ class HashStorage:
     ### This function is used to copy the file to the destination folder and perform the metadata extraction
     def copy_file(self, file_path, file, dest_folder, higher_res=False):
         # if duplicates shouldn't be moved, return
-        if self.data_handling in ["2", "4"] and dest_folder != self.new_dest and not higher_res: return
+        if self.data_handling in ["2", "4"] and dest_folder != self.new_dest and not higher_res: 
+            self.verified[file_path] = ("No action", dest_folder)
+            return
 
-        if self.data_handling in ["6"] and dest_folder not in [self.dupe_dest, self.high_res_dupe_dest]: return
+        if self.data_handling in ["6"] and dest_folder not in [self.dupe_dest, self.high_res_dupe_dest]: 
+            self.verified[file_path] = ("No action", dest_folder)
+            return
 
         if self.data_handling in ["5"] and not higher_res:
             if dest_folder != self.new_dest:
@@ -403,23 +409,36 @@ class HashStorage:
             if self.data_handling in ["1", "2"] and not higher_res:
                 os.makedirs(dest_folder, exist_ok=True)
                 with open(file_path, 'rb') as src, open(dest_path, 'wb') as dest:
-                    dest.write(src.read())
+                    dest.write(src.read())                 
 
             elif self.data_handling in ["3", "4", "6"] or higher_res:
                 os.makedirs(dest_folder, exist_ok=True)
                 os.rename(file_path, dest_path)
-
+                      
             if self.extract_meta and dest_folder == self.new_dest:
                 pe.process_file(dest_path, file_path, self.json_files, self.logger, file, self.json_handling)
+
+            #verification
+            if os.path.exists(dest_path) and (os.path.getsize(dest_path)>0 or dest_folder == self.err_dest):
+                self.verified[file_path] = ("Moved or Copied", dest_path) 
+            else:
+                self.verified[file_path] = ("Error", dest_path)
 
             return dest_path
     
         except Exception as e:
             self.logger.add_error(file_path, e)
+            self.verified[file_path] = ("Error", dest_path)
             return None
         
         
-
+    def verify(self, files):
+        problems = []
+        for file in files:
+            if file not in self.verified:
+                problems.append((file, self.verified[file]))
+        
+        return problems
         
 
     def rename_file(self, file_path, new_name):

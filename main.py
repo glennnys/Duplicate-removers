@@ -350,7 +350,7 @@ def show_comparison_dialog(window, paths, logger, stop_event):
         loaded_pages[page_index] = True
         loading_pages[page_index] = False
 
-        if page_index + 1 < page_count - 1 and not (loaded_pages[page_index + 1] or loading_pages[page_index + 1]):
+        if page_index + 1 < page_count and not (loaded_pages[page_index + 1] or loading_pages[page_index + 1]):
             root.after(1000, lambda: load_page_images(page_index + 1))
          
     prev_next(0)
@@ -618,8 +618,30 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     if i % 10 == 0:
                             progress = i / total
 
+    progress = 0
+    process = "Verifying process"
+    i = None
+    total = None
+    images_verified = seen_hashes.verify(images2)
+    videos_verified = seen_hashes.verify(videos2)
+
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
+
+    if len(images_verified) == 0 and len(videos_verified) == 0:
+        progress = 0
+        process = "Verified all files"
+        i = None
+        total = None
+        time.sleep(1)
+    else:
+        progress = 0
+        process = "Unable to verify all files, check terminal for problems"
+        i = None
+        total = None
+        print(images_verified)
+        print(videos_verified)
+        time.sleep(5)
 
     progress = 0
     process = "Finished finding duplicates, opening selection window"
@@ -632,8 +654,8 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
 
     window.after(20, show_comparison_dialog, window, seen_hashes.higher_res, logger, stop_event)
 
-    print("total: ", logger.get_time())
-    print("avg: ", logger.get_time(avg=True))
+    print("total time allocation: ", logger.get_time())
+    print("average time per run: ", logger.get_time(avg=True))
 
     if len(seen_hashes.higher_res)==0 or stop_event.is_set():
         processing_complete.set()  # Set flag to indicate completion
