@@ -435,8 +435,8 @@ class HashStorage:
     def verify(self, files):
         problems = []
         for file in files:
-            if file not in self.verified:
-                problems.append((file, self.verified[file]))
+            if file not in self.verified or self.verified[file] == "Error":
+                problems.append(file)
         
         return problems
         
