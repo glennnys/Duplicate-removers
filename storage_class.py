@@ -28,6 +28,7 @@ class HashStorage:
         self.lock2 = threading.Lock()
         self.phash_res = phash_res
         self.data_handling = "1"
+        self.duplicate_handling = "1"
 
 
         if threshold == 1.0:
@@ -43,7 +44,8 @@ class HashStorage:
         self.videos = {}
         self.new_images = {}
         self.new_videos = {}
-        self.higher_res = []
+        self.higher_res_to_compare = []
+        self.duplicates_to_compare = []
         self.checked_nodes = 0
 
         self.verified = {}
@@ -89,7 +91,7 @@ class HashStorage:
         img = Image.open(image_path)
         if img.mode != 'RGBA' or img.mode != 'RGB':
             img = img.convert('RGBA')
-            
+
         try:
             for orientation in ExifTags.TAGS.keys():
                 if ExifTags.TAGS[orientation] == 'Orientation':
@@ -384,7 +386,7 @@ class HashStorage:
 
         elif result[3] == "low-res duplicate":
             destination = self.dupe_dest
-
+        
         elif result[3] in ["best new duplicate", "new"]:
             destination = self.new_dest
 
@@ -399,8 +401,12 @@ class HashStorage:
         dest_file = self.copy_file(item[0], None, destination)
         self.logger.add_time(time.time()-start, "Copy item")
 
-        if result[3] == "high-res duplicate" and dest_file is not None:
-            self.higher_res.append((result[1], dest_file))
+        if self.duplicate_handling != "3" and result[3] == "high-res duplicate" and dest_file is not None:
+            self.higher_res_to_compare.append((result[1], dest_file))
+
+        if destination == self.dupe_dest and self.duplicate_handling == "2":
+            self.duplicates_to_compare.append((result[1], dest_file))
+
 
     def is_in_path(self, file_path, base_path):
         file_path = Path(file_path).resolve()
@@ -413,11 +419,12 @@ class HashStorage:
         # if duplicates shouldn't be moved, return
         if self.data_handling in ["2", "4"] and dest_folder != self.new_dest and not higher_res: 
             self.verified[file_path] = ("No action", dest_folder)
-            return
+            return file_path
 
         if self.data_handling in ["6"] and dest_folder not in [self.dupe_dest, self.high_res_dupe_dest]: 
             self.verified[file_path] = ("No action", dest_folder)
-            return
+            return None
+
 
         if self.data_handling in ["5"] and not higher_res:
             if dest_folder != self.new_dest:
@@ -551,7 +558,7 @@ class HashStorage:
     def set_json_files(self, json_files):
         self.json_files = json_files
 
-    def set_destination_folders(self, folder1, folder2, folder3, data_handling, json_handling):
+    def set_destination_folders(self, folder1, folder2, folder3, data_handling, duplicate_handling, json_handling):
         if data_handling not in ["5"]:
             new_dest = os.path.normpath(os.path.join(folder3, "!New"))
             dupe_dest = os.path.normpath(os.path.join(folder3, "!Duplicate"))
@@ -572,6 +579,7 @@ class HashStorage:
         self.existing_folder = folder1
         self.new_folder = folder2
         self.data_handling = data_handling
+        self.duplicate_handling = duplicate_handling
         self.json_handling = json_handling
 
     def set_logger(self, logger):

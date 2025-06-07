@@ -23,8 +23,7 @@ import random
 pillow_heif.register_heif_opener()
 
 ################################## Helper functions ##################################
-def show_comparison_dialog(window, paths, logger, stop_event):
-    global processing_complete
+def show_comparison_dialog(window, paths, logger, stop_event, window_event, higher_res=True):
 
     if stop_event.is_set():
         return
@@ -163,7 +162,7 @@ def show_comparison_dialog(window, paths, logger, stop_event):
     stationary_frame = ttk.Frame(root)
     stationary_frame.pack()
 
-    label = ttk.Label(stationary_frame, text="Duplicates where the new one is a higher resolution than the old one.\nChoose which ones to replace the old ones.\nThe old one will be placed in the duplicates folder.", justify="center")
+    label = ttk.Label(stationary_frame, text=f"{"Duplicates where the new one is a higher resolution than the old one.\nChoose which ones to replace the old ones.\nThe old one will be placed in the duplicates folder." if higher_res else "Choosing to keep a duplicate will place it in the new folder."}", justify="center")
     label.pack(pady=10)
 
     buttons_frame = ttk.Frame(stationary_frame)
@@ -215,6 +214,7 @@ def show_comparison_dialog(window, paths, logger, stop_event):
 
         loading_pages[page_index] = True
         def background():
+            max_size = 100
             # heavy lifting happens here
             prepared_widgets = []
             for i in range(page_index * images_per_page, min(len(old_paths), (page_index + 1) * images_per_page)):
@@ -228,10 +228,10 @@ def show_comparison_dialog(window, paths, logger, stop_event):
                     # Handle image
                     img1 = PILImage.open(old_path)
                     res1 = img1.size
-                    img1 = resize_with_orientation(img1, 400)
+                    img1 = resize_with_orientation(img1, max_size)
                     img2 = PILImage.open(new_path)
                     res2 = img2.size
-                    img2 = resize_with_orientation(img2, 400)
+                    img2 = resize_with_orientation(img2, max_size)
                     
                 except:
                     try:
@@ -245,28 +245,40 @@ def show_comparison_dialog(window, paths, logger, stop_event):
                         if success:
                             img1 = PILImage.fromarray(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
                             res1 = img1.size
-                            img1 = resize_with_orientation(img1, 400)
+                            img1 = resize_with_orientation(img1, max_size)
                             img2 = PILImage.fromarray(cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB))
                             res2 = img2.size
-                            img2= resize_with_orientation(img2, 400)
+                            img2= resize_with_orientation(img2, max_size)
                         else:
-                            img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                            img1 = PILImage.new("RGB", (max_size, max_size), "black")  # Fallback to a blank image if frame extraction fails
                             res1 = img1.size
-                            img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                            img2 = PILImage.new("RGB", (max_size, max_size), "black")  # Fallback to a blank image if frame extraction fails
                             res2 = img2.size
                     except:
-                        img1 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                        img1 = PILImage.new("RGB", (max_size, max_size), "black")  # Fallback to a blank image if frame extraction fails
                         res1 = img1.size
-                        img2 = PILImage.new("RGB", (400, 400), "black")  # Fallback to a blank image if frame extraction fails
+                        img2 = PILImage.new("RGB", (max_size, max_size), "black")  # Fallback to a blank image if frame extraction fails
                         res2 = img2.size
     
 
                 tk_img1 = ImageTk.PhotoImage(img1)
                 tk_img2 = ImageTk.PhotoImage(img2)
+                # Get file size in bytes for each image
+                size1 = os.path.getsize(old_path) if os.path.exists(old_path) else 0
+                size2 = os.path.getsize(new_path) if os.path.exists(new_path) else 0
+                # Convert sizes to human-readable format
+                def human_readable_size(size):
+                    for unit in ['bytes', 'KB', 'MB', 'GB', 'TB']:
+                        if size < 1024.0 or unit == 'TB':
+                            return f"{size:.2f} {unit}" if unit != 'bytes' else f"{int(size)} {unit}"
+                        size /= 1024.0
+
+                size1_str = human_readable_size(size1)
+                size2_str = human_readable_size(size2)
 
                 images.append(tk_img1)
                 images.append(tk_img2)
-                prepared_widgets.append((tk_img1, tk_img2, res1, res2, old_path, new_path))  # Store relevant UI elements
+                prepared_widgets.append((tk_img1, tk_img2, res1, res2, size1_str, size2_str, old_path, new_path))  # Store relevant UI elements
 
             # Now schedule UI update on main thread
             root.after(0, display_page_images, page_index, prepared_widgets)
@@ -293,7 +305,7 @@ def show_comparison_dialog(window, paths, logger, stop_event):
         mainframes[page_index].bind("<FocusIn>", lambda e, a=page_index: pages[a].focus_set())
 
         i = page_index*images_per_page
-        for tk_img1, tk_img2, res1, res2, old_path, new_path in widgets:
+        for tk_img1, tk_img2, res1, res2, size1_str, size2_str, old_path, new_path in widgets:
             selection_frame = ttk.Frame(mainframes[page_index])
             selection_frame.pack()
             
@@ -312,7 +324,7 @@ def show_comparison_dialog(window, paths, logger, stop_event):
             old_button.pack(padx=10, pady=10)
 
             ttk.Label(left_frame, text=old_path, wraplength=400).pack(padx=20)
-            ttk.Label(left_frame, text=f'resolution: ({res1[0]}x{res1[1]})').pack(padx=20)
+            ttk.Label(left_frame, text=f'resolution: ({res1[0]}x{res1[1]}) | size: {size1_str}').pack(padx=20)
 
             right_frame = Frame(selection_frame)
             right_frame.pack(side="left")
@@ -327,19 +339,20 @@ def show_comparison_dialog(window, paths, logger, stop_event):
             new_button.pack(padx=10, pady=10)
 
             ttk.Label(right_frame, text=new_path, wraplength=400).pack(padx=20)
-            ttk.Label(right_frame, text=f'resolution: ({res2[0]}x{res2[1]})').pack(padx=20)
+            ttk.Label(right_frame, text=f'resolution: ({res2[0]}x{res2[1]}) | size: {size2_str}').pack(padx=20)
 
             both_frame = Frame(selection_frame)
             both_frame.pack(side="left")
             
-            # Radiobutton for True
-            both_button = ttk.Radiobutton(
-                both_frame,
-                text="Both",
-                variable=selection_vars[i],
-                value=2
-            )
-            both_button.pack(padx=10, pady=10)
+            if higher_res:
+                # Radiobutton for True
+                both_button = ttk.Radiobutton(
+                    both_frame,
+                    text="Both",
+                    variable=selection_vars[i],
+                    value=2
+                )
+                both_button.pack(padx=10, pady=10)
 
             i+=1
 
@@ -357,17 +370,24 @@ def show_comparison_dialog(window, paths, logger, stop_event):
 
     root.wait_window()  # Wait for the dialog to close
 
-    for result in zip(selection, old_paths, new_paths):
-        if result[0] == 1:
-            seen_hashes.swap_files(result[1], result[2])
-        elif result[0] == 2:
-            seen_hashes.copy_file(result[2], None, seen_hashes.new_dest, True)
+    if higher_res:
 
-    processing_complete.set()
+        for result in zip(selection, old_paths, new_paths):
+            if result[0] == 1:
+                seen_hashes.swap_files(result[1], result[2])
+            elif result[0] == 2:
+                seen_hashes.copy_file(result[2], None, seen_hashes.new_dest, True)
+
+    else:
+        for result in zip(selection, old_paths, new_paths):
+            if result[0] == 1:
+                seen_hashes.copy_file(result[2], None, seen_hashes.new_dest, True)
+
+    window_event.set()
 
 
 ################################## Main processing function ##################################
-def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json_handling, stop_event):
+def process_folder(folder1_path, folder2_path, folder3_path, data_handling, duplicate_handling, json_handling, stop_event):
     global seen_hashes
     global processing_complete
     global progress
@@ -390,7 +410,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             if not os.path.exists(dest_folder):
                 os.makedirs(dest_folder, exist_ok=True)
 
-    seen_hashes.set_destination_folders(folder1_path, folder2_path, folder3_path, data_handling, json_handling)
+    seen_hashes.set_destination_folders(folder1_path, folder2_path, folder3_path, data_handling, duplicate_handling, json_handling)
     seen_hashes.set_logger(logger)
 
     start = time.time()
@@ -452,7 +472,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             
             if i%10==0:
                 progress = i / total
-                time_remaining = (time.time()-start)*total/i
+                time_remaining = (time.time()-start)*(total-i)/i
 
 
     logger.add_time(time.time()-start, "Compare remaining")
@@ -480,7 +500,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     future.result()  # Wait for the task to complete
                     if i % 10 == 0:  # Update progress every 10 iterations
                         progress = i / total
-                        time_remaining = (time.time()-start)*total/i
+                        time_remaining = (time.time()-start)*(total-i)/i
 
         start = time.time()
         if type_select_var.get() in ["1", "3"]:
@@ -496,7 +516,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     future.result()
                     if i % 10 == 0:
                         progress = i / total
-                        time_remaining = (time.time()-start)*total/i
+                        time_remaining = (time.time()-start)*(total-i)/i
 
         start = time.time()
         if type_select_var.get() in ["1", "2"]:
@@ -512,7 +532,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     future.result()
                     if i % 10 == 0:
                         progress = i / total
-                        time_remaining = (time.time()-start)*total/i
+                        time_remaining = (time.time()-start)*(total-i)/i
 
         start = time.time()
         if type_select_var.get() in ["1", "3"]:
@@ -528,7 +548,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     future.result()
                     if i % 10 == 0:
                         progress = i / total
-                        time_remaining = (time.time()-start)*total/i
+                        time_remaining = (time.time()-start)*(total-i)/i
 
     else:
         start = time.time()
@@ -543,7 +563,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                 seen_hashes.hash_image(image)
                 if i % 10 == 0:
                         progress = i / total
-                        time_remaining = (time.time()-start)*total/i
+                        time_remaining = (time.time()-start)*(total-i)/i
 
         start = time.time()
         if type_select_var.get() in ["1", "3"]:
@@ -557,7 +577,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                 seen_hashes.hash_video(video)
                 if i % 10 == 0:
                         progress = i / total
-                        time_remaining = (time.time()-start)*total/i
+                        time_remaining = (time.time()-start)*(total-i)/i
 
         start = time.time()
         if type_select_var.get() in ["1", "2"]:
@@ -571,7 +591,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                 seen_hashes.hash_image(image, True)
                 if i % 10 == 0:
                         progress = i / total
-                        time_remaining = (time.time()-start)*total/i
+                        time_remaining = (time.time()-start)*(total-i)/i
 
         start = time.time()
         if type_select_var.get() in ["1", "3"]:
@@ -585,7 +605,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                 seen_hashes.hash_video(video, True)
                 if i % 10 == 0:
                         progress = i / total
-                        time_remaining = (time.time()-start)*total/i
+                        time_remaining = (time.time()-start)*(total-i)/i
 
     progress = 0
     process = "saving hashes for later use"
@@ -619,7 +639,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                             future.result()
                             if i % 10 == 0:
                                     progress = i / total
-                                    time_remaining = (time.time()-start)*total/i
+                                    time_remaining = (time.time()-start)*(total-i)/i
 
         start = time.time()
         if type_select_var.get() in ["1", "3"]:
@@ -635,7 +655,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                             future.result()
                             if i % 10 == 0:
                                     progress = i / total    
-                                    time_remaining = (time.time()-start)*total/i                
+                                    time_remaining = (time.time()-start)*(total-i)/i                
 
     else:  
         start = time.time()
@@ -650,7 +670,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     seen_hashes.check_duplicates(image, seen_hashes.images, seen_hashes.new_images)
                     if i % 10 == 0:
                             progress = i / total
-                            time_remaining = (time.time()-start)*total/i
+                            time_remaining = (time.time()-start)*(total-i)/i
         
         start = time.time()
         if type_select_var.get() in ["1", "3"]:
@@ -664,7 +684,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     seen_hashes.check_duplicates(video, seen_hashes.videos, seen_hashes.new_videos)
                     if i % 10 == 0:
                             progress = i / total
-                            time_remaining = (time.time()-start)*total/i
+                            time_remaining = (time.time()-start)*(total-i)/i
 
     progress = 0
     process = "Verifying process"
@@ -700,15 +720,23 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
 
     if seen_hashes.checked_nodes>0:
         print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes:.1f}x speed up.")
-    print(f"{len(seen_hashes.higher_res)} images or videos have a higher resolution than their pre-existing counterpart")
+    print(f"{len(seen_hashes.higher_res_to_compare)} images or videos have a higher resolution than their pre-existing counterpart")
 
-    window.after(20, show_comparison_dialog, window, seen_hashes.higher_res, logger, stop_event)
+    window_event = threading.Event()
+    if seen_hashes.duplicate_handling in ["1", "2"]:
+        window_event.clear()
+        window.after(20, show_comparison_dialog, window, seen_hashes.higher_res_to_compare, logger, stop_event, True)
+        window_event.wait()
+
+    if seen_hashes.duplicate_handling == "2":
+        window_event.clear()
+        window.after(20, show_comparison_dialog, window, seen_hashes.duplicates_to_compare, logger, stop_event, False)
+        window_event.wait()
 
     print("total time allocation: ", logger.get_time())
     print("average time per run: ", logger.get_time(avg=True))
 
-    if len(seen_hashes.higher_res)==0 or stop_event.is_set():
-        processing_complete.set()  # Set flag to indicate completion
+    processing_complete.set()  # Set flag to indicate completion
 
 ################################## GUI ##################################
 total_size = 0
@@ -840,12 +868,17 @@ def on_folder3_selected(path):
 
 def on_folder_selected():
     global total_size
+    
+    if data_handling_var.get() not in ["5"]:
+        duplicate_frame2.pack(expand=True, fill=BOTH)
 
     if data_handling_var.get() in ["3", "4", "6"]:
         label4.config(text=f"No additional space will be taken up on the disk.")
+
     
     elif data_handling_var.get() in ["5"]:
         label4.config(text=f"Some space might be freed up from the disk.")
+        duplicate_frame2.pack_forget()
 
     elif folder_path2.get() and folder_path2.get() != '':
         if folder_path3.get() and folder_path3.get() != '':
@@ -874,8 +907,8 @@ label1 = Label(frame1, text="Select the folder with existing files (can be left 
 label1.pack(fill=X, expand=True)
 entry_frame1 = Frame(frame1)
 entry_frame1.pack()
-entry1 = Entry(entry_frame1, textvariable=folder_path1, font=small_font)
-entry1.pack(side=LEFT, ipady=3)  # Adjust ipady to match the button height
+entry1 = Entry(entry_frame1, textvariable=folder_path1, font=small_font, width=50)
+entry1.pack(side=LEFT, ipady=6)  # Adjust ipady to match the button height
 button1 = Button(entry_frame1, text="Browse", font=small_font, command=lambda: folder_path1.set(filedialog.askdirectory()))
 button1.pack(side=LEFT)
 open_folder_button = Button(entry_frame1, text="Open folder", font=small_font, command=lambda: os.startfile(folder_path1.get()) if folder_path1.get() else None)
@@ -889,8 +922,8 @@ label2 = Label(frame2, text="Select the folder with new files", font=mid_font)
 label2.pack(fill=X, expand=True)
 entry_frame2 = Frame(frame2)
 entry_frame2.pack()
-entry2 = Entry(entry_frame2, textvariable=folder_path2, font=small_font)
-entry2.pack(side=LEFT, ipady=3)
+entry2 = Entry(entry_frame2, textvariable=folder_path2, font=small_font, width=50)
+entry2.pack(side=LEFT, ipady=6)
 button2 = Button(entry_frame2, text="Browse", font=small_font, command=lambda: on_folder2_selected(filedialog.askdirectory()))
 button2.pack(side=LEFT,)
 open_folder_button = Button(entry_frame2, text="Open folder", font=small_font, command=lambda: os.startfile(folder_path2.get()) if folder_path2.get() else None)
@@ -905,8 +938,8 @@ label3 = Label(frame3, text="Select the destination folder (can be left empty)",
 label3.pack(fill=X, expand=True)
 entry_frame3 = Frame(frame3)
 entry_frame3.pack()
-entry3 = Entry(entry_frame3, textvariable=folder_path3, font=small_font)
-entry3.pack(side=LEFT, ipady=3)
+entry3 = Entry(entry_frame3, textvariable=folder_path3, font=small_font, width=50)
+entry3.pack(side=LEFT, ipady=6)
 button3 = Button(entry_frame3, text="Browse", font=small_font, command=lambda: on_folder3_selected(filedialog.askdirectory()))
 button3.pack(side=LEFT)
 open_folder_button = Button(entry_frame3, text="Open folder", font=small_font, command=lambda: os.startfile(folder_path3.get()) if folder_path3.get() else None)
@@ -1000,7 +1033,7 @@ def start_process():
     seen_hashes = fs.HashStorage(threshold=threshold, extract_meta=extract_meta)
     stop_event.clear()
     processing_complete.clear()
-    processing_thread = threading.Thread(target=process_folder, args=(folder_path1.get(), folder_path2.get(), folder_path3.get(), data_handling_var.get(), delete_jsons_var.get(), stop_event))
+    processing_thread = threading.Thread(target=process_folder, args=(folder_path1.get(), folder_path2.get(), folder_path3.get(), data_handling_var.get(), dup_select_var.get(), delete_jsons_var.get(), stop_event))
     processing_thread.start()
 
     update_progress_and_process()
@@ -1058,6 +1091,28 @@ delete_jsons_var = BooleanVar()
 delete_jsons_check = ttk.Checkbutton(radio_frame, text="Delete json files after metadata extraction", variable=delete_jsons_var)
 delete_jsons_check.pack(side=LEFT,pady=5)
 delete_jsons_check.pack_forget()
+
+duplicate_frame1 = Frame(window)
+duplicate_frame1.pack(expand=True, fill=BOTH)
+duplicate_frame2 = Frame(duplicate_frame1)
+duplicate_frame2.pack(expand=True, fill=BOTH)
+
+duplicate_label = ttk.Label(duplicate_frame2, text="Do you want to open a window afterwards to compare duplicates? (Shows the first duplicate image that it found)")
+duplicate_label.pack()
+
+check_frame = Frame(duplicate_frame2)
+check_frame.pack(pady=10)
+
+dup_select_var = StringVar()
+dup_select_values = {"Only new higher resolution duplicates" : "1",
+                      "All duplicates" : "2",
+                      "No duplicates" : "3"}
+
+for (text, value) in dup_select_values.items():
+     ttk.Radiobutton(check_frame, text=text, variable=dup_select_var, value = value).pack(side=LEFT,pady=5)
+
+dup_select_var.set("1")
+
 
 # buttons
 
