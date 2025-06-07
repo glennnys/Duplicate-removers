@@ -14,6 +14,8 @@ import subprocess
 import os
 import time
 
+Image.MAX_IMAGE_PIXELS = None
+
 pillow_heif.register_heif_opener()
 enable_threading = False
 
@@ -92,6 +94,8 @@ def process_exif(file_path, json_exif, exif_type, logger, file=None):
     # Open the image if not provided
     start = time.time()
     image = file if file else Image.open(file_path)
+    if image.mode != 'RGBA' or image.mode != 'RGB':
+            image = image.convert('RGBA')
     logger.add_time(time.time()-start, "Opening image")
 
     try:
@@ -119,6 +123,8 @@ def process_meta(file_path, json_data, type, logger, file=None):
     # Open the image
     start = time.time()
     image = file if file else Image.open(file_path)
+    if image.mode != 'RGBA' or image.mode != 'RGB':
+            image = image.convert('RGBA')
     logger.add_time(time.time()-start, "Opening image")
 
     start = time.time()

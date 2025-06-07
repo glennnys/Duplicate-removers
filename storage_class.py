@@ -1,6 +1,7 @@
 import threading
 import cv2
 from PIL import Image
+from PIL import ExifTags 
 import imagehash
 import metadata_extractor as pe
 import os
@@ -11,6 +12,8 @@ import math
 from pathlib import Path
 import shutil
 import time
+
+Image.MAX_IMAGE_PIXELS = None
 
 VPTreeNode = namedtuple('VPTreeNode', ['point', 'threshold', 'left', 'right'])
     
@@ -81,6 +84,32 @@ class HashStorage:
                     hash_val = imagehash.hex_to_hash(hash_str)
                     self.images[path] = [hash_val, None, res, False]
 
+    def oriented_image(self, image_path):
+        # Step 1: Apply EXIF orientation
+        img = Image.open(image_path)
+        if img.mode != 'RGBA' or img.mode != 'RGB':
+            img = img.convert('RGBA')
+            
+        try:
+            for orientation in ExifTags.TAGS.keys():
+                if ExifTags.TAGS[orientation] == 'Orientation':
+                    break
+
+            exif = img._getexif()
+            if exif is not None:
+                orientation_value = exif.get(orientation)
+
+                if orientation_value == 3:
+                    img = img.rotate(180, expand=True)
+                elif orientation_value == 6:
+                    img = img.rotate(270, expand=True)
+                elif orientation_value == 8:
+                    img = img.rotate(90, expand=True)
+        except (AttributeError, KeyError, IndexError):
+            # No EXIF data or orientation tag
+            pass
+
+        return img
     
     def hash_image(self, image, is_new=False):
         start = time.time()
@@ -275,7 +304,8 @@ class HashStorage:
             return [None, None, (0, 0), False]
         #if self.advanced_comparison:
         try:
-            image = Image.open(image_path)
+            image = self.oriented_image(image_path)
+
             try: 
                 return [imagehash.phash(image), None, self.get_image_size(image), False]
             except:
@@ -300,9 +330,19 @@ class HashStorage:
                 if not ret:
                     break
                 if frame_count % frame_interval == 0:
-                    frame = Image.fromarray(frame)
+                    pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-                    video_hashes.append(imagehash.phash(frame))
+                    # Generate hashes for 4 rotations
+                    hashes = [
+                        imagehash.phash(pil_img),
+                        imagehash.phash(pil_img.rotate(90, expand=True)),
+                        imagehash.phash(pil_img.rotate(180, expand=True)),
+                        imagehash.phash(pil_img.rotate(270, expand=True))
+                    ]
+
+                    # Use the smallest hash (closest to origin) to ensure rotation-invariant matching
+                    min_hash = min(hashes)
+                    video_hashes.append(min_hash)
                     hash_count += 1
                 
                 frame_count += 1

@@ -18,7 +18,7 @@ import cv2
 import json
 import logkeeper
 import math
-import hashlib
+import random
 
 pillow_heif.register_heif_opener()
 
@@ -426,12 +426,17 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
     remaining_files2 = [file for file in files2 if file not in images2 and file not in videos2 and file not in jsons]
     logger.add_time(time.time()-start, "Setup")
 
+    # shuffle files by size
+    random.shuffle(images2)
+    random.shuffle(videos2)
+
     # compare remaining files for exact copies
     start = time.time()
     if folder1_path is not None and folder3_path is not None:
         progress = 0
         process = "Comparing non-image and video files for exact copies"
         total = len(remaining_files2)
+        time_remaining = 0
 
         i = 0
         for file2 in remaining_files2:
@@ -444,22 +449,29 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
             else:
                 dest_folder = os.path.join(folder3_path, "!Unsorted")
                 seen_hashes.copy_file(file2, None, dest_folder)
-            progress = i / total
+            
+            if i%10==0:
+                progress = i / total
+                time_remaining = (time.time()-start)*total/i
+
 
     logger.add_time(time.time()-start, "Compare remaining")
 
     start = time.time()
     progress = 0
     process = "loading old hashes"
+    time_remaining = 0
     seen_hashes.load_items()
     logger.add_time(time.time()-start, "Load hashes")
 
     
     if enable_threads:
+        start = time.time()
         if type_select_var.get() in ["1", "2"]:
             progress = 0
             process = "Hashing old images"
             total = len(images1)
+            time_remaining = 0
             with ThreadPoolExecutor() as executor:
                 futures = [executor.submit(seen_hashes.hash_image, image) for image in images1]
                 for i, future in enumerate(futures):
@@ -468,11 +480,14 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     future.result()  # Wait for the task to complete
                     if i % 10 == 0:  # Update progress every 10 iterations
                         progress = i / total
+                        time_remaining = (time.time()-start)*total/i
 
+        start = time.time()
         if type_select_var.get() in ["1", "3"]:
             progress = 0
             process = "Hashing old videos"
             total = len(videos1)
+            time_remaining = 0
             with ThreadPoolExecutor() as executor:
                 futures = [executor.submit(seen_hashes.hash_video, video) for video in videos1]
                 for i, future in enumerate(futures):
@@ -481,11 +496,14 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     future.result()
                     if i % 10 == 0:
                         progress = i / total
+                        time_remaining = (time.time()-start)*total/i
 
+        start = time.time()
         if type_select_var.get() in ["1", "2"]:
             progress = 0
             process = "Hashing new images"
             total = len(images2)
+            time_remaining = 0
             with ThreadPoolExecutor() as executor:
                 futures = [executor.submit(seen_hashes.hash_image, image, True) for image in images2]
                 for i, future in enumerate(futures):
@@ -494,11 +512,14 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     future.result()
                     if i % 10 == 0:
                         progress = i / total
+                        time_remaining = (time.time()-start)*total/i
 
+        start = time.time()
         if type_select_var.get() in ["1", "3"]:
             progress = 0
             process = "Hashing new videos"
             total = len(videos2)
+            time_remaining = 0
             with ThreadPoolExecutor() as executor:
                 futures = [executor.submit(seen_hashes.hash_video, video, True) for video in videos2]
                 for i, future in enumerate(futures):
@@ -507,54 +528,68 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                     future.result()
                     if i % 10 == 0:
                         progress = i / total
+                        time_remaining = (time.time()-start)*total/i
 
     else:
+        start = time.time()
         if type_select_var.get() in ["1", "2"]:
             progress = 0
             process = "Hashing old images"
             total = len(images1)
+            time_remaining = 0
             for i, image in enumerate(images1): 
                 if stop_event.is_set():
                     return
                 seen_hashes.hash_image(image)
                 if i % 10 == 0:
                         progress = i / total
+                        time_remaining = (time.time()-start)*total/i
 
+        start = time.time()
         if type_select_var.get() in ["1", "3"]:
             progress = 0
             process = "Hashing old video"
             total = len(videos1)
+            time_remaining = 0
             for i, video in enumerate(videos1): 
                 if stop_event.is_set():
                     return
                 seen_hashes.hash_video(video)
                 if i % 10 == 0:
                         progress = i / total
+                        time_remaining = (time.time()-start)*total/i
 
+        start = time.time()
         if type_select_var.get() in ["1", "2"]:
             progress = 0
             process = "Hashing new images"
             total = len(images2)
+            time_remaining = 0
             for i, image in enumerate(images2): 
                 if stop_event.is_set():
                     return
                 seen_hashes.hash_image(image, True)
                 if i % 10 == 0:
                         progress = i / total
+                        time_remaining = (time.time()-start)*total/i
 
+        start = time.time()
         if type_select_var.get() in ["1", "3"]:
             progress = 0
             process = "Hashing new videos"
             total = len(videos2)
+            time_remaining = 0
             for i, video in enumerate(videos2): 
                 if stop_event.is_set():
                     return
                 seen_hashes.hash_video(video, True)
                 if i % 10 == 0:
                         progress = i / total
+                        time_remaining = (time.time()-start)*total/i
 
     progress = 0
     process = "saving hashes for later use"
+    time_remaining = 0
     seen_hashes.save_items()
 
     seen_hashes.set_json_files(jsons_dict)
@@ -568,11 +603,14 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
         process = "Building video tree"
         seen_hashes.build_video_tree()
 
+
     if enable_threads:
+        start = time.time()
         if type_select_var.get() in ["1", "2"]:
             progress = 0
             process = "Finding duplicate images"
             total = len(seen_hashes.new_images)
+            time_remaining = 0
             with ThreadPoolExecutor() as executor:
                     futures = [executor.submit(seen_hashes.check_duplicates, image, seen_hashes.images, seen_hashes.new_images) for image in seen_hashes.new_images.items()]
                     for i, future in enumerate(futures): 
@@ -581,11 +619,14 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                             future.result()
                             if i % 10 == 0:
                                     progress = i / total
+                                    time_remaining = (time.time()-start)*total/i
 
+        start = time.time()
         if type_select_var.get() in ["1", "3"]:
             progress = 0
             process = "Finding duplicate videos"
             total = len(seen_hashes.new_videos)
+            time_remaining = 0
             with ThreadPoolExecutor() as executor:
                     futures = [executor.submit(seen_hashes.check_duplicates, video, seen_hashes.videos, seen_hashes.new_videos) for video in seen_hashes.new_videos.items()]
                     for i, future in enumerate(futures): 
@@ -593,35 +634,44 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, json
                                 return
                             future.result()
                             if i % 10 == 0:
-                                    progress = i / total                    
+                                    progress = i / total    
+                                    time_remaining = (time.time()-start)*total/i                
 
     else:  
+        start = time.time()
         if type_select_var.get() in ["1", "2"]:
             progress = 0
             process = "Finding duplicate images"
             total = len(seen_hashes.new_images)
+            time_remaining = 0
             for i, image in enumerate(seen_hashes.new_images.items()): 
                     if stop_event.is_set():                            
                         return
                     seen_hashes.check_duplicates(image, seen_hashes.images, seen_hashes.new_images)
                     if i % 10 == 0:
                             progress = i / total
-
+                            time_remaining = (time.time()-start)*total/i
+        
+        start = time.time()
         if type_select_var.get() in ["1", "3"]:
             progress = 0
             process = "Finding duplicate videos"
             total = len(seen_hashes.new_videos)
+            time_remaining = 0
             for i, video in enumerate(seen_hashes.new_videos.items()): 
                     if stop_event.is_set():
                         return
                     seen_hashes.check_duplicates(video, seen_hashes.videos, seen_hashes.new_videos)
                     if i % 10 == 0:
                             progress = i / total
+                            time_remaining = (time.time()-start)*total/i
 
     progress = 0
     process = "Verifying process"
     i = None
     total = None
+    time_remaining = 0
+
     images_verified = seen_hashes.verify(images2)
     videos_verified = seen_hashes.verify(videos2)
 
