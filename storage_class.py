@@ -12,6 +12,8 @@ import math
 from pathlib import Path
 import shutil
 import time
+import subprocess
+import json
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -77,14 +79,14 @@ class HashStorage:
         with open(filepath, 'rb') as f:
             serialized = pickle.load(f)
 
-        for path, hash_str, res in serialized:
-            if os.path.exists(path):
+        for path, hash_str, size in serialized:
+            if os.path.exists(path) and os.path.getsize(path) == size:
                 if isinstance(hash_str, list):
                     hash_val = [imagehash.hex_to_hash(hash_st) for hash_st in hash_str]
-                    self.videos[path] = [hash_val, None, res, False]
+                    self.videos[path] = [hash_val, None, size, False]
                 else:
                     hash_val = imagehash.hex_to_hash(hash_str)
-                    self.images[path] = [hash_val, None, res, False]
+                    self.images[path] = [hash_val, None, size, False]
 
     def oriented_image(self, image_path):
         # Step 1: Apply EXIF orientation
@@ -183,11 +185,13 @@ class HashStorage:
             return(0, 0)
         
     
-    def disable_node(self, path, is_image=True):
+    def disable_node(self, path, other_path, is_image=True):
         if is_image:
             self.new_images[path][3] = True
+            self.new_images[path][1] = other_path
         else:
             self.new_videos[path][3] = True
+            self.new_videos[path][1] = other_path
     
 
     def build_vptree(self, items_dict):
@@ -224,8 +228,7 @@ class HashStorage:
     def search_vptree(self, tree, query_path, items, new_items, result=None, is_images=True):
         if result is None:
             try:
-                query_hash, _, query_dims, _ = new_items[query_path]
-                query_res = query_dims[0] * query_dims[1]
+                query_hash, _, query_res, _ = new_items[query_path]
                 result = (query_res, None, query_path, "new")
             except:
                 result = (0, None, query_path, "new")
@@ -235,13 +238,10 @@ class HashStorage:
         self.checked_nodes += 1
         
         try:
-            query_hash, _, query_dims, _ = new_items[query_path]
-            query_res = query_dims[0] * query_dims[1]
+            query_hash, _, query_res, _ = new_items[query_path]
             
             candidate_path = tree.point
-            candidate_hash, _, candidate_dims, _ = items[candidate_path]
-
-            candidate_res = candidate_dims[0] * candidate_dims[1]
+            candidate_hash, _, candidate_res, _ = items[candidate_path]
         except:
             #skip nodes with problems
             return result
@@ -259,14 +259,14 @@ class HashStorage:
 
                 else:
                     if candidate_res > query_res:
-                        return (candidate_res, result[1], query_path, "low-res duplicate")
+                        return (candidate_res, candidate_path, query_path, "low-res duplicate")
                     else:
                         if query_res > candidate_res or self.alpha_sort(query_path, candidate_path) == query_path:
                             if result[3] == "high-res duplicate":
-                                result = (query_res, result[1], query_path, result[3])
+                                result = (query_res, candidate_path, query_path, "high-res duplicate")
                             else:
-                                result = (query_res, result[1], query_path, "best new duplicate")
-                            self.disable_node(candidate_path, is_images)
+                                result = (query_res, candidate_path, query_path, "best new duplicate")
+                            self.disable_node(candidate_path, query_path, is_images)
                         else:
                             return (candidate_res, candidate_path, query_path, "low-res duplicate")
 
@@ -304,25 +304,70 @@ class HashStorage:
     def get_image_hash(self, image_path):
         if os.path.getsize(image_path) == 0:
             return [None, None, (0, 0), False]
-        #if self.advanced_comparison:
+        # GIF support: If the file is a GIF, hash the first frame only.
         try:
-            image = self.oriented_image(image_path)
-
+            if image_path.lower().endswith('.gif'):
+                with Image.open(image_path) as img:
+                    img.seek(0)  # First frame
+                    img = img.convert('RGBA')
+                    try:
+                        return [imagehash.phash(img), None, os.path.getsize(image_path), False]
+                    except:
+                        img.thumbnail((1000, 1000))
+                        return [imagehash.phash(img), None, os.path.getsize(image_path), False]
+            else:
+                image = self.oriented_image(image_path)
             try: 
-                return [imagehash.phash(image), None, self.get_image_size(image), False]
+                return [imagehash.phash(image), None, os.path.getsize(image_path), False]
             except:
                 image.thumbnail((1000, 1000))
-                return [imagehash.phash(image), None, self.get_image_size(image), False]
+                return [imagehash.phash(image), None, os.path.getsize(image_path), False]
         except:
             im = Image.new(mode="RGB", size=(200, 200))
-            return [imagehash.phash(im), None, (0, 0), False]
+            return [imagehash.phash(im), None, 0, False]
+        
+    def get_video_rotation(self, path):
+        """Extract rotation from video metadata using ffprobe."""
+        try:
+            cmd = [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream_tags=rotate',
+                '-of', 'json', path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        
+            data = json.loads(result.stdout)
+            rotate = int(data['streams'][0]['tags'].get('rotate', 0))
+        except Exception:
+            rotate = 0
+        return rotate
+
+    def rotate_frame(self, frame, rotation):
+        """Physically rotate frame."""
+        if rotation == 90:
+            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        elif rotation == 180:
+            return cv2.rotate(frame, cv2.ROTATE_180)
+        elif rotation == 270:
+            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return frame
+
+    def resize_frame(self, frame, width):
+        """Resize while keeping aspect ratio."""
+        h, w = frame.shape[:2]
+        aspect = h / w
+        new_height = int(width * aspect)
+        return cv2.resize(frame, (width, new_height), interpolation=cv2.INTER_AREA)
 
 
-    def get_video_hashes(self, video_path, frame_interval=24, max_hashes=5):
+    def get_video_hashes(self, video_path, frame_interval=24, max_hashes=3):
         if os.path.getsize(video_path) == 0:
-            return [None, None, (0, 0), False]
+            return [None, None, 0, False]
+        
         #if self.advanced_comparison:
         try:
+            rotation = self.get_video_rotation(video_path)
             cap = cv2.VideoCapture(video_path)
             video_hashes = []
             frame_count = 0
@@ -332,24 +377,16 @@ class HashStorage:
                 if not ret:
                     break
                 if frame_count % frame_interval == 0:
+                    frame = self.rotate_frame(frame, rotation)
+
                     pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-                    # Generate hashes for 4 rotations
-                    hashes = [
-                        imagehash.phash(pil_img),
-                        imagehash.phash(pil_img.rotate(90, expand=True)),
-                        imagehash.phash(pil_img.rotate(180, expand=True)),
-                        imagehash.phash(pil_img.rotate(270, expand=True))
-                    ]
-
-                    # Use the smallest hash (closest to origin) to ensure rotation-invariant matching
-                    min_hash = min(hashes)
-                    video_hashes.append(min_hash)
+                    video_hashes.append(imagehash.phash(pil_img))
                     hash_count += 1
                 
                 frame_count += 1
 
-            item = [video_hashes, None, self.get_video_size(cap), False]
+            item = [video_hashes, None, os.path.getsize(video_path), False]
 
             if cap.isOpened():
                 cap.release()
@@ -357,7 +394,7 @@ class HashStorage:
         except:
             im = Image.new(mode="RGB", size=(200, 200))
             video_hashes = [imagehash.phash(im) for i in range(max_hashes)]
-            item = [video_hashes, None, (0, 0), False]
+            item = [video_hashes, None, 0, False]
     
         return item
 
@@ -365,20 +402,25 @@ class HashStorage:
     
     #### This function is used to check if the image is duplicate or not
     def check_duplicates(self, item, items, new_items):
+        task = ""
         start1 = time.time()
         if item[1][0] is None:
             result = (item[0], None, None, 'error')
+            task = "error"
         elif item[1][3]:
-            result = (item[0], None, None, 'low-res duplicate')
+            result = (item[0], item[1][1], None, 'low-res duplicate')
+            task = "'skipped"
         else:
             if type(item[1][0]) != list:
                 start2 = time.time()            
                 result = self.search_vptree(self.image_tree, item[0], items, new_items)
                 self.logger.add_time(time.time()-start2, "Search images")
+                task = "searched"
             else:
                 start2 = time.time() 
                 result = self.search_vptree(self.video_tree, item[0], items, new_items, is_images=False)
                 self.logger.add_time(time.time()-start2, "Search videos")
+                task = "searched"
       
         
         if result is None:
@@ -412,6 +454,19 @@ class HashStorage:
         file_path = Path(file_path).resolve()
         base_path = Path(base_path).resolve()
         return base_path in file_path.parents
+    
+    
+    def move_file(self, file_path, current_folder, dest_folder):
+        file_name = os.path.relpath(file_path, start=current_folder)
+        dest_path = os.path.join(dest_folder, file_name)
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+        # if the same file name already exists, add a number at the end
+        dest_path = self.safe_rename(dest_path)
+        os.makedirs(dest_folder, exist_ok=True)
+        os.rename(file_path, dest_path)
+
+        return dest_path
     
 
     ### This function is used to copy the file to the destination folder and perform the metadata extraction
@@ -537,6 +592,8 @@ class HashStorage:
             # Step 2: Swap files
             shutil.move(path1, new_path1)  # Move path1 to path2's folder (possibly renamed)
             shutil.move(path2, new_path2)  # Move path2 to path1's folder (possibly renamed)
+
+        return new_path1, new_path2
 
             
     
