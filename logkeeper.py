@@ -7,6 +7,15 @@ class LogKeeper:
         self.time_lock = threading.Lock()
         self.error_lock = threading.Lock()
 
+    def clear(self, thing_to_clear="all"):
+        if thing_to_clear == "all":
+            self.individual_times = {}
+            self.errors = {}
+        if thing_to_clear == "times":
+            self.individual_times = {}
+        if thing_to_clear == "errors":
+            self.errors = {}
+
     def add_time(self, time, event):
         with self.time_lock:
             if event not in self.individual_times:
@@ -15,11 +24,10 @@ class LogKeeper:
             self.individual_times[event].append(time)
 
     def make_time_readable(self, time):
-        hours = int(time // 3600)
-        minutes = int((time % 3600) // 60)
-        seconds = int(time % 60)
-        milliseconds = int((time - int(time)) * 1000)
-
+        total_ms = int(round(time * 1000))
+        hours, rem = divmod(total_ms, 3_600_000)
+        minutes, rem = divmod(rem, 60_000)
+        seconds, milliseconds = divmod(rem, 1_000)
         # Format the string
         return f"{hours:02}h:{minutes:02}m:{seconds:02}s:{milliseconds:03}ms"
 

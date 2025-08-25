@@ -197,7 +197,7 @@ def remove_suffix(filepath):
     return new_filepath
     
 
-def process_file(file_path, original_path, jsons, logger, file=None, remove_jsons=False, ):
+def process_file(file_path, original_path, jsons, logger, file=None, remove_jsons=False):
     potential_names = [original_path, remove_suffix(original_path)]
 
     first_existing = next((jsons[name] for name in potential_names if os.path.abspath(name) in jsons), None)

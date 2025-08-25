@@ -4,7 +4,7 @@ import time
 from PIL import Image as PILImage
 from PIL import ImageTk, ExifTags  # Ensure PIL.Image is imported for image operations
 import pillow_heif
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from tkinter import *
 from tkinter import ttk
@@ -303,9 +303,9 @@ def show_comparison_dialog(window, paths, logger, stop_event, window_event, high
     label_frame = ttk.Frame(stationary_frame)
     label_frame.pack(pady=10)
 
-    old_label = ttk.Label(label_frame, text="Old image, lower resolution")
+    old_label = ttk.Label(label_frame, text=f"Old image{", higher resoltion." if higher_res else "."}")
     old_label.pack(side="left", padx=100)
-    new_label = ttk.Label(label_frame, text="new image, higher resolution")
+    new_label = ttk.Label(label_frame, text=f"New image{", higher resoltion." if higher_res else "."}")
     new_label.pack(side="right", padx=100)
 
     try:
@@ -493,7 +493,7 @@ def show_comparison_dialog(window, paths, logger, stop_event, window_event, high
                 dest1, dest2 = seen_hashes.swap_files(result[1], result[2])
                 seen_hashes.move_file(dest1, seen_hashes.high_res_dupe_dest, seen_hashes.dupe_dest)
             elif result[0] == 2:
-                seen_hashes.copy_file(result[2], None, seen_hashes.new_dest, True)
+                seen_hashes.copy_file(result[2], seen_hashes.new_dest, True)
 
     else:
         for result in zip(selection, old_paths, new_paths):
@@ -510,40 +510,31 @@ def show_comparison_dialog(window, paths, logger, stop_event, window_event, high
 def process_folder(folder1_path, folder2_path, folder3_path, data_handling, duplicate_handling, json_handling, stop_event):
     global seen_hashes
     global processing_complete
-    global progress
-    global process
-    global time_remaining
-    global i
-    global total
+    global tracker
 
     logger = logkeeper.LogKeeper()
+    logger.clear("all")
 
     startiest_time = time.time()
     files1 = []
     files2 = []
-    jsons = []
 
-    # Create destination folders
-    if folder3_path != "":
-        for folder in ["!Duplicate", "!New", "!Error", "!Unsorted"]:
-            dest_folder = os.path.join(folder3_path, folder)
-            if not os.path.exists(dest_folder):
-                os.makedirs(dest_folder, exist_ok=True)
+    image_extensions = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]
+    video_extensions = [".mp4", ".mov", ".avi", ".mkv", ".m4v"]
+
+    tracker["progress"] = 0
+    tracker["process"] = "Preparing"
+    tracker["total"] = 0
 
     seen_hashes.set_destination_folders(folder1_path, folder2_path, folder3_path, data_handling, duplicate_handling, json_handling)
     seen_hashes.set_logger(logger)
+    seen_hashes.set_tracker(tracker)
 
-    start = time.time()
     # if folder1_path is None, only compare files in folder2_path
     if folder1_path is not None:
         for root, _, file_names in os.walk(folder1_path):
             for file in file_names:
-                files1.append(os.path.join(root, file))
-
-        # Separate images and videos from other files for folder 1
-        images1 = [file for file in files1 if os.path.splitext(file)[1].lower() in [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]]
-        videos1 = [file for file in files1 if os.path.splitext(file)[1].lower() in [".mp4", ".mov", ".avi", ".mkv"]]
-        remaining_files1 = [file for file in files1 if file not in images1 and file not in videos1]
+                files1.append(os.path.join(root, file))  
 
     # get all files in folder 2, store json files separately
     for root, _, file_names in os.walk(folder2_path):
@@ -552,300 +543,23 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, dupl
             path = os.path.normpath(path)
             files2.append(path)
 
-    # Separate images and videos from other files for folder 2
-    images2 = [file for file in files2 if os.path.splitext(file)[1].lower() in [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]]
-    videos2 = [file for file in files2 if os.path.splitext(file)[1].lower() in [".mp4", ".mov", ".avi", ".mkv"]]
-    jsons = [file for file in files2 if os.path.splitext(file)[1].lower() in [".json"]]
-    jsons_dict = {}
+    # Separate images and videos from other files for folder 1
+    exclude = image_extensions if type_select_var.get() == "3" else video_extensions if type_select_var.get() == "2" else []
+    files1 = [file for file in files1 if os.path.splitext(file)[1].lower() not in exclude]
+    files2 = [file for file in files2 if os.path.splitext(file)[1].lower() not in exclude]
 
-    for file_path in jsons:
-        with open(file_path, 'r') as file:
-            data = json.load(file)
-            jsons_dict[os.path.join(os.path.dirname(file_path), data['title'])] = os.path.abspath(file_path)
-
-    remaining_files2 = [file for file in files2 if file not in images2 and file not in videos2 and file not in jsons]
-    logger.add_time(time.time()-start, "Setup")
-
-    # shuffle files by size
-    random.shuffle(images2)
-    random.shuffle(videos2)
-
-    # compare remaining files for exact copies
-    start = time.time()
-    if folder1_path is not None and folder3_path is not None:
-        progress = 0
-        process = "Comparing non-image and video files for exact copies"
-        total = len(remaining_files2)
-        time_remaining = 0
-
-        i = 0
-        for file2 in remaining_files2:
-            if stop_event.is_set():
-                return
-            i += 1
-            if file2 in remaining_files1:
-                dest_folder = os.path.join(folder3_path, "!Duplicates")
-                seen_hashes.copy_file(file2, None, dest_folder)
-            else:
-                dest_folder = os.path.join(folder3_path, "!Unsorted")
-                seen_hashes.copy_file(file2, None, dest_folder)
-            
-            if i%10==0:
-                progress = i / total
-                time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-
-    logger.add_time(time.time()-start, "Compare remaining")
-
-    start = time.time()
-    progress = 0
-    process = "loading old hashes"
-    time_remaining = 0
-    seen_hashes.load_items()
-    logger.add_time(time.time()-start, "Load hashes")
-
-    
-    if enable_threads:
-        start = time.time()
-        if type_select_var.get() in ["1", "2"]:
-            progress = 0
-            process = "Hashing old images"
-            total = len(images1)
-            time_remaining = 0
-            with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(seen_hashes.hash_image, image) for image in images1]
-                for i, future in enumerate(futures):
-                    if stop_event.is_set():
-                        return
-                    future.result()  # Wait for the task to complete
-                    if i % 10 == 0:  # Update progress every 10 iterations
-                        progress = i / total
-                        time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-        start = time.time()
-        if type_select_var.get() in ["1", "3"]:
-            progress = 0
-            process = "Hashing old videos"
-            total = len(videos1)
-            time_remaining = 0
-            with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(seen_hashes.hash_video, video) for video in videos1]
-                for i, future in enumerate(futures):
-                    if stop_event.is_set():
-                        return
-                    future.result()
-                    if i % 10 == 0:
-                        progress = i / total
-                        time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-        start = time.time()
-        if type_select_var.get() in ["1", "2"]:
-            progress = 0
-            process = "Hashing new images"
-            total = len(images2)
-            time_remaining = 0
-            with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(seen_hashes.hash_image, image, True) for image in images2]
-                for i, future in enumerate(futures):
-                    if stop_event.is_set():
-                        return
-                    future.result()
-                    if i % 10 == 0:
-                        progress = i / total
-                        time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-        start = time.time()
-        if type_select_var.get() in ["1", "3"]:
-            progress = 0
-            process = "Hashing new videos"
-            total = len(videos2)
-            time_remaining = 0
-            with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(seen_hashes.hash_video, video, True) for video in videos2]
-                for i, future in enumerate(futures):
-                    if stop_event.is_set():
-                        return
-                    future.result()
-                    if i % 10 == 0:
-                        progress = i / total
-                        time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-    else:
-        start = time.time()
-        if type_select_var.get() in ["1", "2"]:
-            progress = 0
-            process = "Hashing old images"
-            total = len(images1)
-            time_remaining = 0
-            for i, image in enumerate(images1): 
-                if stop_event.is_set():
-                    return
-                seen_hashes.hash_image(image)
-                if i % 10 == 0:
-                        progress = i / total
-                        time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-        start = time.time()
-        if type_select_var.get() in ["1", "3"]:
-            progress = 0
-            process = "Hashing old video"
-            total = len(videos1)
-            time_remaining = 0
-            for i, video in enumerate(videos1): 
-                if stop_event.is_set():
-                    return
-                seen_hashes.hash_video(video)
-                if i % 10 == 0:
-                        progress = i / total
-                        time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-        start = time.time()
-        if type_select_var.get() in ["1", "2"]:
-            progress = 0
-            process = "Hashing new images"
-            total = len(images2)
-            time_remaining = 0
-            for i, image in enumerate(images2): 
-                if stop_event.is_set():
-                    return
-                seen_hashes.hash_image(image, True)
-                if i % 10 == 0:
-                        progress = i / total
-                        time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-        start = time.time()
-        if type_select_var.get() in ["1", "3"]:
-            progress = 0
-            process = "Hashing new videos"
-            total = len(videos2)
-            time_remaining = 0
-            for i, video in enumerate(videos2): 
-                if stop_event.is_set():
-                    return
-                seen_hashes.hash_video(video, True)
-                if i % 10 == 0:
-                        progress = i / total
-                        time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-    progress = 0
-    process = "saving hashes for later use"
-    time_remaining = 0
-    seen_hashes.save_items()
-
-    seen_hashes.set_json_files(jsons_dict)
-
-    progress = 0
-    if type_select_var.get() in ["1", "2"]:
-        process = "Building image tree"
-        seen_hashes.build_image_tree()
-
-    if type_select_var.get() in ["1", "3"]:
-        process = "Building video tree"
-        seen_hashes.build_video_tree()
-
-
-    if enable_threads:
-        start = time.time()
-        if type_select_var.get() in ["1", "2"]:
-            progress = 0
-            process = "Finding duplicate images"
-            total = len(seen_hashes.new_images)
-            time_remaining = 0
-            with ThreadPoolExecutor() as executor:
-                    futures = [executor.submit(seen_hashes.check_duplicates, image, seen_hashes.images, seen_hashes.new_images) for image in seen_hashes.new_images.items()]
-                    for i, future in enumerate(futures): 
-                            if stop_event.is_set():
-                                return
-                            future.result()
-                            if i % 10 == 0:
-                                    progress = i / total
-                                    time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-        start = time.time()
-        if type_select_var.get() in ["1", "3"]:
-            progress = 0
-            process = "Finding duplicate videos"
-            total = len(seen_hashes.new_videos)
-            time_remaining = 0
-            with ThreadPoolExecutor() as executor:
-                    futures = [executor.submit(seen_hashes.check_duplicates, video, seen_hashes.videos, seen_hashes.new_videos) for video in seen_hashes.new_videos.items()]
-                    for i, future in enumerate(futures): 
-                            if stop_event.is_set():
-                                return
-                            future.result()
-                            if i % 10 == 0:
-                                    progress = i / total    
-                                    time_remaining = (time.time()-start)*(total-i)/(i+1)                
-
-    else:  
-        start = time.time()
-        if type_select_var.get() in ["1", "2"]:
-            progress = 0
-            process = "Finding duplicate images"
-            total = len(seen_hashes.new_images)
-            time_remaining = 0
-            for i, image in enumerate(seen_hashes.new_images.items()): 
-                    if stop_event.is_set():                            
-                        return
-                    seen_hashes.check_duplicates(image, seen_hashes.images, seen_hashes.new_images)
-                    if i % 10 == 0:
-                            progress = i / total
-                            time_remaining = (time.time()-start)*(total-i)/(i+1)
-        
-        start = time.time()
-        if type_select_var.get() in ["1", "3"]:
-            progress = 0
-            process = "Finding duplicate videos"
-            total = len(seen_hashes.new_videos)
-            time_remaining = 0
-            for i, video in enumerate(seen_hashes.new_videos.items()): 
-                    if stop_event.is_set():
-                        return
-                    seen_hashes.check_duplicates(video, seen_hashes.videos, seen_hashes.new_videos)
-                    if i % 10 == 0:
-                            progress = i / total
-                            time_remaining = (time.time()-start)*(total-i)/(i+1)
-
-    progress = 0
-    process = "Verifying process"
-    i = None
-    total = None
-    time_remaining = 0
-
-    images_verified = []
-    videos_verified = []
-    if type_select_var.get() in ["1", "2"]:
-        images_verified = seen_hashes.verify(images2)
-    if type_select_var.get() in ["1", "3"]:
-        videos_verified = seen_hashes.verify(videos2)
+    seen_hashes.check_duplicates(files1, files2)
+    if stop_event.is_set(): return
 
     processing_time = time.time() - startiest_time
     print(f"Processing time: {processing_time:.2f} seconds")
 
-    if len(images_verified) == 0 and len(videos_verified) == 0:
-        progress = 0
-        process = "Verified all files"
-        i = None
-        total = None
-        time.sleep(1)
-    else:
-        progress = 0
-        process = "Unable to verify all files, check terminal for problems"
-        i = None
-        total = None
-        if type_select_var.get() in ["1", "2"]:
-            print(images_verified)
-        if type_select_var.get() in ["1", "3"]:
-            print(videos_verified)
-        time.sleep(5)
-
-    progress = 0
-    process = "Finished finding duplicates, opening selection window"
-    i = None
-    total = None
+    tracker["progress"] = 0
+    tracker["process"] = "Finished finding duplicates, opening selection window"
+    tracker["total"] = None
 
     if seen_hashes.checked_nodes>0:
-        print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos)} times. A {(len(seen_hashes.images)*len(seen_hashes.new_images) + len(seen_hashes.videos)*len(seen_hashes.new_videos))/seen_hashes.checked_nodes:.1f}x speed up.")
+        print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(files1) * len(files2)} times. A {(len(files1) * len(files2))/seen_hashes.checked_nodes:.1f}x speed up.")
     print(f"{len(seen_hashes.higher_res_to_compare)} images or videos have a higher resolution than their pre-existing counterpart")
 
     window_event = threading.Event()
@@ -870,6 +584,58 @@ total_size = 0
 window = Tk()
 style = ttk.Style()
 sv_ttk.set_theme("dark")
+
+def run_task(enable_threading, type_select_var, type_select_options, function, args, process_name):
+    global tracker
+    if stop_event.is_set():
+            return
+    
+    start = time.time()
+    tracker["progress"] = 0
+    tracker["process"] = process_name
+    tracker["time remaining"] = 0
+    tracker["total"] = len(args)
+
+    if enable_threading:
+        
+        if type_select_var.get() in type_select_options:
+            with ThreadPoolExecutor() as executor:
+                # Submit lazily with as_completed, not all at once
+                futures = {executor.submit(function, *arg): arg for arg in args}
+
+                for i, future in enumerate(as_completed(futures)):
+                    tracker["i"] = i
+                    if stop_event.is_set():
+                        # Cancel remaining futures that haven't started
+                        for f in futures:
+                            f.cancel()
+                        break
+
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print("Task error:", e)
+
+                    if i % 10 == 0:
+                        tracker["progress"] = i / tracker["total"]
+                        tracker["time remaining"] = (time.time() - start) * (tracker["total"] - i) / (i + 1)
+
+        if stop_event.is_set():
+            return
+        
+    else:
+        start = time.time()
+        if type_select_var.get() in type_select_options:
+            for i, item in enumerate(args): 
+                if stop_event.is_set():
+                    break
+                function(*item)
+                if i % 10 == 0:
+                        tracker["progress"] = i / tracker["total"]
+                        tracker["time remaining"] = (time.time()-start)*(tracker["total"]-i)/(i+1)
+
+        if stop_event.is_set():
+            return
 
 def on_closing(only_stop_threads=False):
     # cancel threads
@@ -912,11 +678,13 @@ seen_hashes = None
 processing_thread = None
 processing_complete = threading.Event()
 stop_event = threading.Event()
-progress = 0
-process = None
-time_remaining = 0
-i = 0
-total = 0
+tracker = {
+    "progress": 0,
+    "process": None,
+    "time remaining":  0,
+    "i": 0,
+    "total": 0
+}
 threshold = 0.9
 
 folder_path1 = StringVar()
@@ -1127,6 +895,7 @@ def start_process():
     global seen_hashes
     global stop_event
     global processing_complete
+    global enable_threads
 
     if not folder_path2.get():
         messagebox.showerror("Error", "Please select the folder with new files")
@@ -1147,7 +916,7 @@ def start_process():
     entry2.config(state=DISABLED)
     entry3.config(state=DISABLED)
     
-    seen_hashes = fs.HashStorage(threshold=threshold, extract_meta=extract_meta)
+    seen_hashes = fs.HashStorage(stop_event=stop_event, enable_threading=enable_threads, threshold=threshold, extract_meta=extract_meta)
     stop_event.clear()
     processing_complete.clear()
     processing_thread = threading.Thread(target=process_folder, args=(folder_path1.get(), folder_path2.get(), folder_path3.get(), data_handling_var.get(), dup_select_var.get(), delete_jsons_var.get(), stop_event))
@@ -1160,7 +929,7 @@ info_frame = Frame(window)
 info_frame.pack(pady=20)
 
 info_label = Label(info_frame, text="""Enabling threading will increase speed drastically but will consume all computer resources.
-                   \n Enabling metadata extraction searches for json files corresponding to each file containing metadata. Another significant slowdown""", font=small_font, foreground='cyan')
+                   \n Enabling metadata extraction searches for json files corresponding to each file containing metadata, slowing down the process.""", font=small_font, foreground='cyan')
 info_label.pack(fill=X, expand=True)
 
 threshold_frame = Frame(window)
@@ -1205,7 +974,7 @@ for (text, value) in type_select_values.items():
 type_select_var.set("1")
 
 delete_jsons_var = BooleanVar()
-delete_jsons_check = ttk.Checkbutton(radio_frame, text="Delete json files after metadata extraction", variable=delete_jsons_var)
+delete_jsons_check = ttk.Checkbutton(radio_frame, text="Delete json files after metadata extraction?", variable=delete_jsons_var)
 delete_jsons_check.pack(side=LEFT,pady=5)
 delete_jsons_check.pack_forget()
 
@@ -1214,7 +983,7 @@ duplicate_frame1.pack(expand=True, fill=BOTH)
 duplicate_frame2 = Frame(duplicate_frame1)
 duplicate_frame2.pack(expand=True, fill=BOTH)
 
-duplicate_label = ttk.Label(duplicate_frame2, text="Do you want to open a window afterwards to compare duplicates? (Shows the first duplicate image that it found)")
+duplicate_label = ttk.Label(duplicate_frame2, text="Open a window afterwards to compare duplicates?")
 duplicate_label.pack()
 
 check_frame = Frame(duplicate_frame2)
@@ -1282,19 +1051,18 @@ def update_process_label(process=None, progress=0, time_remaining=0, i=None, tot
     return f"Progress: {progress:.2%} - {process}"
 
 def update_progress_and_process():
-    global progress
-    global process
-    global time_remaining
-    global i
-    global total
+    global tracker
+    if stop_event.is_set(): return
 
     if not processing_complete.is_set():
-        update_progress(progress)
-        process_label["text"] = update_process_label(process, progress, time_remaining, i, total)	
+        update_progress(tracker["progress"])
+        if stop_event.is_set(): return
+        process_label["text"] = update_process_label(tracker["process"], tracker["progress"], tracker["time remaining"], tracker["i"], tracker["total"])	
         window.after(100, update_progress_and_process)
     else:
-        update_progress(progress)
-        process_label["text"] = update_process_label("Finished", 1, time_remaining, None, None)
+        update_progress(tracker["progress"])
+        if stop_event.is_set(): return
+        process_label["text"] = update_process_label("Finished", 1, tracker["time remaining"], None, None)
         on_closing(only_stop_threads=True)
 
 progress_frame = Frame(window)
