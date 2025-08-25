@@ -104,7 +104,6 @@ def show_comparison_dialog(window, paths, logger, stop_event, window_event, high
 
         # If the page hasn't been loaded, start loading it
         if not loaded_pages[target_page]:
-            load_page_images(target_page)
             root.after(200, lambda: prev_next(value))  # Retry once loading starts
             return
 
@@ -573,74 +572,24 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, dupl
         window.after(20, show_comparison_dialog, window, seen_hashes.duplicates_to_compare, logger, stop_event, window_event, False)
         window_event.wait()
 
-    print("total time allocation: ", logger.get_time())
+    print("total time allocation: ", logger.get_time(sort="9"))
     print("average time per run: ", logger.get_time(avg=True))
 
     processing_complete.set()  # Set flag to indicate completion
 
 ################################## GUI ##################################
 total_size = 0
+readable_size = "0 Bytes"
 #open prompt window to select folder, start at the path specified in the path variable
 window = Tk()
 style = ttk.Style()
 sv_ttk.set_theme("dark")
 
-def run_task(enable_threading, type_select_var, type_select_options, function, args, process_name):
-    global tracker
-    if stop_event.is_set():
-            return
-    
-    start = time.time()
-    tracker["progress"] = 0
-    tracker["process"] = process_name
-    tracker["time remaining"] = 0
-    tracker["total"] = len(args)
-
-    if enable_threading:
-        
-        if type_select_var.get() in type_select_options:
-            with ThreadPoolExecutor() as executor:
-                # Submit lazily with as_completed, not all at once
-                futures = {executor.submit(function, *arg): arg for arg in args}
-
-                for i, future in enumerate(as_completed(futures)):
-                    tracker["i"] = i
-                    if stop_event.is_set():
-                        # Cancel remaining futures that haven't started
-                        for f in futures:
-                            f.cancel()
-                        break
-
-                    try:
-                        future.result()
-                    except Exception as e:
-                        print("Task error:", e)
-
-                    if i % 10 == 0:
-                        tracker["progress"] = i / tracker["total"]
-                        tracker["time remaining"] = (time.time() - start) * (tracker["total"] - i) / (i + 1)
-
-        if stop_event.is_set():
-            return
-        
-    else:
-        start = time.time()
-        if type_select_var.get() in type_select_options:
-            for i, item in enumerate(args): 
-                if stop_event.is_set():
-                    break
-                function(*item)
-                if i % 10 == 0:
-                        tracker["progress"] = i / tracker["total"]
-                        tracker["time remaining"] = (time.time()-start)*(tracker["total"]-i)/(i+1)
-
-        if stop_event.is_set():
-            return
-
 def on_closing(only_stop_threads=False):
     # cancel threads
     global processing_complete
     global stop_event
+    global seen_hashes
     stop_event.set()
 
     # Wait for the thread to finish
@@ -652,6 +601,7 @@ def on_closing(only_stop_threads=False):
             window.quit()  # Stop the main loop
             window.destroy() # Destroy the window
     else:
+        print("current time allocations: ", seen_hashes.logger.get_time(sort="9"))
         # re-enable all buttons
         button1.config(state=NORMAL)
         button2.config(state=NORMAL)
@@ -686,6 +636,7 @@ tracker = {
     "total": 0
 }
 threshold = 0.9
+workers = 1
 
 folder_path1 = StringVar()
 folder_path2 = StringVar()
@@ -728,6 +679,7 @@ def human_readable_size(size):
 
 def on_folder2_selected(path):
     global total_size
+    global readable_size
     if path == '' or path is None:
         return
     folder_path2.set(path)
@@ -737,7 +689,7 @@ def on_folder2_selected(path):
         for file in file_names:
             files.append(os.path.join(root, file))
     total_size = sum(os.path.getsize(file) for file in files)
-    total_size = human_readable_size(total_size)
+    readable_size = human_readable_size(total_size)
 
     on_folder_selected()
 
@@ -751,7 +703,7 @@ def on_folder3_selected(path):
     on_folder_selected()
 
 def on_folder_selected():
-    global total_size
+    global readable_size
     
     if data_handling_var.get() not in ["5"]:
         duplicate_frame2.pack(expand=True, fill=BOTH)
@@ -771,10 +723,10 @@ def on_folder_selected():
             free_space = get_free_space(folder_path3.get())
             free_space = human_readable_size(free_space)
             
-            label4.config(text=f"Warning: This process will take up (at most) {total_size}/{free_space} extra on the disk.")
+            label4.config(text=f"Warning: This process will take up (at most) {readable_size}/{free_space} extra on the disk.")
         else:
             #can no longer be accessed
-            label4.config(text=f"Warning: This process will take up (at most) {total_size} extra on the disk.")
+            label4.config(text=f"Warning: This process will take up (at most) {readable_size} extra on the disk.")
 
     elif folder_path3.get() and folder_path3.get() != '':
         free_space = get_free_space(folder_path3.get())
@@ -896,10 +848,16 @@ def start_process():
     global stop_event
     global processing_complete
     global enable_threads
+    global total_size
 
     if not folder_path2.get():
-        messagebox.showerror("Error", "Please select the folder with new files")
+        messagebox.showerror("Error", "Please select the folder with new files.")
         return
+    
+    if folder_path3.get() and folder_path3.get() != '' and total_size > get_free_space(folder_path3.get()):
+        messagebox.showerror("Error", f"Please free up at least {human_readable_size(total_size-get_free_space(folder_path3.get()))} from disk.")
+        return
+
 
     progress_frame.pack(fill=X, expand=True)
     # disable all buttons
@@ -947,7 +905,6 @@ threshold_slider.pack(fill=X, expand=True, side=LEFT)
 #threshold label
 threshold_label = Label(threshold_frame, text=f"Threshold: {threshold:.2f}", font=small_font)
 threshold_label.pack(fill=X, expand=True, side=LEFT)
-
 
 # detect slider changes
 def on_threshold_change(value):

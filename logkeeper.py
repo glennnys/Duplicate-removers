@@ -38,7 +38,7 @@ class LogKeeper:
 
             self.errors[error].append(file)
 
-    def get_time(self, event=None, avg=False):
+    def get_time(self, event=None, avg=False, sort="9"):
         total_dict = {}
         events = [event] if event is not None else self.individual_times
 
@@ -49,10 +49,20 @@ class LogKeeper:
                     total += time
             
                 if avg:    
-                    total_dict[event] = self.make_time_readable(total/len(self.individual_times[event]))
+                    total_dict[event] = total/len(self.individual_times[event])
                 else:
-                    total_dict[event] = self.make_time_readable(total)
+                    total_dict[event] = total
         
+        key_lambda = lambda item: item[0] 
+        if sort in ["a","z"]:
+            key_lambda = lambda item: item[0]
+        elif sort in ["0", "9"]:
+            key_lambda = lambda item: item[1]
+         
+        reverse = sort in ["z", "9"]
+        
+        
+        total_dict = {k: self.make_time_readable(v) for k, v in sorted(total_dict.items(), key=key_lambda, reverse=reverse)}
         return total_dict
         
     def get_errors(self, error=None, count=False):

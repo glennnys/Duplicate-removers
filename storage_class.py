@@ -26,7 +26,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 VPTreeNode = namedtuple('VPTreeNode', ['point', 'threshold', 'left', 'right'])
     
 class HashStorage:
-    def __init__(self, stop_event, enable_threading=True, threshold=0.9, extract_meta=True, phash_res=8, advanced_comparison=False, logger=None, tracker=None):
+    def __init__(self, stop_event, enable_threading=True, threshold=0.9, extract_meta=True, phash_res=8, advanced_comparison=True, logger=None, tracker=None):
         self.stop_event = stop_event
         self.enable_threading=enable_threading
         self.threshold = threshold
@@ -80,14 +80,18 @@ class HashStorage:
 
         #existing files
         for key, item in combination.items():
-            if not isinstance(item[1], (int, float)) or not isinstance(item[2], (int, float)):
-                continue
+            try:
+                if not isinstance(item[1], (int, float)) or not isinstance(item[2], (int, float)):
+                    continue
 
-            if not isinstance(item[0], list):
-                serialized.append((key, str(item[0]), item[1], item[2]))
-            else:
-                hashhex=[str(i) for i in item[0]]
-                serialized.append((key, hashhex, item[1], item[2]))
+                if not isinstance(item[0], list):
+                    serialized.append((key, str(item[0]), item[1], item[2]))
+                else:
+                    hashhex=[str(i) for i in item[0]]
+                    serialized.append((key, hashhex, item[1], item[2]))
+            
+            except Exception as e:
+                print(f"Couldn't save {key}. Reason: {e}")
         
         filepath = os.path.join(os.getcwd(), "hash cache", self.cache_name) if self.cache_name is not None else self.safe_rename(os.path.join(os.getcwd(), "hash cache", "dupe.cache"))
         self.cache_name = os.path.basename(filepath)
@@ -111,34 +115,50 @@ class HashStorage:
                 for path, hash_str, ar, size in serialized[1:]:
                     if not isinstance(path, str) or not isinstance(ar, (float, int)) or not isinstance(size, (int, float)): 
                         continue
-                    if os.path.exists(path) and os.path.getsize(path) == size:
-                        
-                        item = []
-                        if path.startswith(self.existing_folder):
-                            if isinstance(hash_str, list):
-                                hash_val = [imagehash.hex_to_hash(hash_st) for hash_st in hash_str]
-                                item = [hash_val, ar, size, False, None]
-                                self.old_videos[path] = item
-                                self.add_video_name_index(item, path)
-                            else:
-                                hash_val = imagehash.hex_to_hash(hash_str)
-                                item = [hash_val, ar, size, False, None]
-                                self.old_images[path] = item
-                                self.add_image_index(item, path)
+                    try:
+                        if os.path.exists(path) and os.path.getsize(path) == size:
 
-                        elif path in new_files:
-                            if isinstance(hash_str, list):
-                                hash_val = [imagehash.hex_to_hash(hash_st) for hash_st in hash_str]
-                                item = [hash_val, ar, size, False, None]
-                                self.new_videos[path] = item
-                            else:
-                                hash_val = imagehash.hex_to_hash(hash_str)
-                                item = [hash_val, ar, size, False, None]
-                                self.new_images[path] = item
-                        
+                            item = []
+                            if path.startswith(self.existing_folder):
+                                if isinstance(hash_str, list):
+                                    hash_val = [imagehash.hex_to_hash(hash_st) for hash_st in hash_str]
+                                    item = [hash_val, ar, size, False, None]
+                                    self.old_videos[path] = item
+                                    self.add_video_name_index(item, path)
+                                else:
+                                    hash_val = imagehash.hex_to_hash(hash_str)
+                                    item = [hash_val, ar, size, False, None] 
+                                    self.old_images[path] = item
+                                    self.add_image_index(item, path)
+
+                            elif path in new_files:
+                                if isinstance(hash_str, list):
+                                    hash_val = [imagehash.hex_to_hash(hash_st) for hash_st in hash_str]
+                                    item = [hash_val, ar, size, False, None]
+                                    self.new_videos[path] = item
+                                else:
+                                    hash_val = imagehash.hex_to_hash(hash_str)
+                                    item = [hash_val, ar, size, False, None] 
+                                    self.new_images[path] = item
+
+                    except Exception as e:
+                        print(f"Couldn't load {path}. Reason: {e}")  
+ 
                 break
 
 ##### DO THE THING #####
+    def check_if_previously_processed(self, file):
+        rel_path = os.path.relpath(file, self.new_folder)
+        destination_folders = [self.new_dest, self.unsorted_dest, self.dupe_dest, self.high_res_dupe_dest, self.err_dest]
+        possible_destinations = [os.path.join(destination_folder, rel_path) for destination_folder in destination_folders]
+
+        for possible_dest in possible_destinations:
+            if os.path.exists(possible_dest) and self.files_are_identical(file, possible_dest):
+                self.verified[file] = ("Already done", possible_dest)
+                return
+        
+        return file
+
     def fast_search(self, original_files, new_files, process_name="fast searching files", only_compare_to_originals=True, allow_comparison=True):
         original_size_dict = defaultdict(list)
         new_size_dict = defaultdict(list)
@@ -147,12 +167,21 @@ class HashStorage:
         self.tracker["progress"] = 0
         self.tracker["time remainig"] = 0
         self.tracker["i"] = 0
+        
+        # skip files that were already processed
+        files_to_process = []
+        results = self.run_task(self.check_if_previously_processed, args=new_files, process_name=f"{process_name}: checking if already processed", allow_saving=False)
+        if self.stop_event.is_set(): return 
+        for result in results:
+            if result: files_to_process.append(result)
+
+        if len(files_to_process) == 0: return []
 
         # Store as lists (mutable): [name, is_new, hash, is_duplicate]
         for file in original_files:
             original_size_dict[os.path.getsize(file)].append([file, False, None, False])
 
-        for file in new_files:
+        for file in files_to_process:
             new_size_dict[os.path.getsize(file)].append([file, True, None, False])                  
 
         args = []
@@ -229,6 +258,7 @@ class HashStorage:
         return _build(list(items_dict.keys()))
 
     def search_vptree(self, tree, query_path, items, new_items, result=None, is_images=True):
+        start = time.time()
         if result is None:
             try:
                 query = new_items[query_path]
@@ -263,13 +293,17 @@ class HashStorage:
             #skip nodes with problems
             return (0, candidate_path, query_path, "error")
         
+        self.logger.add_time(time.time()-start, "tree search prep")
+        start = time.time()
+        
         d = self.hamming_distance(query_hash, candidate_hash)
 
         if candidate_path != query_path:
 
             if d < self.real_threshold and self.ar_similarity(candidate_ar, query_ar) >= self.threshold:
                 
-                if not is_images or d <= self.real_threshold>>1 or (is_images and self.advanced_comparison and self.is_really_duplicate(candidate_path, query_path)):
+                if not is_images or (is_images and self.advanced_comparison and self.is_really_duplicate(candidate_path, query_path)):
+                    self.logger.add_time(time.time()-start, "dupe calculation: succes")
                     if self.is_in_path(candidate_path, self.existing_folder) and self.existing_folder != "":
                         if candidate_res >= query_res:
                             return (candidate_res, candidate_path, query_path, "low-res duplicate")
@@ -288,6 +322,10 @@ class HashStorage:
                                 self.disable_node(candidate_path, query_path, is_images)
                             else:
                                 return (candidate_res, candidate_path, query_path, "low-res duplicate")
+                            
+                self.logger.add_time(time.time()-start, "dupe calculation: advanced fail")
+
+            self.logger.add_time(time.time()-start, "dupe calculation: basic fail")
 
         go_left = d - self.real_threshold <= tree.threshold
         go_right = d + self.real_threshold >= tree.threshold
@@ -315,11 +353,11 @@ class HashStorage:
         
         for match in name_matches:
             if self.hamming_distance(match[1], item[1][0]) < self.real_threshold and match[2]>=item[1][2]:
-                self.logger.add_time(time.time()-start, "prechecking")    
-                return (None, match[0], item[0], 'low-res duplicate')
+                self.logger.add_time(time.time()-start, "prechecking: duplicate")    
+                return (0, match[0], item[0], 'low-res duplicate')
 
-        self.logger.add_time(time.time()-start, "prechecking") 
-        return (None, None, item[0], None)
+        self.logger.add_time(time.time()-start, "prechecking: no duplicate") 
+        return (0, None, item[0], None)
 
     def check_duplicates(self, files1, files2):
         if not isinstance(files1, (list, tuple)):
@@ -360,7 +398,6 @@ class HashStorage:
         simple_search = self.threshold == 1
 
         results = self.fast_search(images1, images2, process_name="fast searching images", only_compare_to_originals=False)
-        
         if self.stop_event.is_set(): return
         potentially_new_images = []
         for result in results:
@@ -379,9 +416,6 @@ class HashStorage:
                     self.handle_result((None, None, result, "new"))
                 else:   
                     potentially_new_videos.append(result)
-
-        random.shuffle(potentially_new_videos)
-        if self.stop_event.is_set(): return
         
         if not simple_search:
             start = time.time()
@@ -392,26 +426,31 @@ class HashStorage:
             if self.stop_event.is_set(): return
             self.logger.add_time(time.time()-start, "Load hashes")
 
-            self.run_task(process_name="Hashing old images", function=self.hash_image, args=[(image, False) for image in images1])
-            if self.stop_event.is_set(): return
-            self.save_items()
-            self.run_task(process_name="Hashing old videos", function=self.hash_video, args=[(video, False) for video in videos1])
-            if self.stop_event.is_set(): return
-            self.save_items()
-            self.run_task(process_name="Hashing new images", function=self.hash_image, args=[(image, True) for image in potentially_new_images])
-            if self.stop_event.is_set(): return
-            self.save_items()
-            self.run_task(process_name="Hashing new videos", function=self.hash_video, args=[(video, True) for video in potentially_new_videos])
-            if self.stop_event.is_set(): return
-            self.save_items()
-            self.build_image_tree()
-            if self.stop_event.is_set(): return
-            self.build_video_tree()
-            if self.stop_event.is_set(): return
-            self.run_task(process_name="finding duplicate images", function=self.find_duplicates, args=[(image, self.old_images | self.new_images, self.new_images) for image in self.new_images.items()])
-            if self.stop_event.is_set(): return
-            self.run_task(process_name="finding duplicate videos", function=self.find_duplicates, args=[(video, self.old_videos | self.new_videos, self.new_videos) for video in self.new_videos.items()])
-            if self.stop_event.is_set(): return
+            if len(potentially_new_images) > 0:
+                random.shuffle(potentially_new_images)
+                self.run_task(process_name="Hashing old images", function=self.hash_image, args=[(image, False) for image in images1])
+                if self.stop_event.is_set(): return
+                self.run_task(process_name="Hashing new images", function=self.hash_image, args=[(image, True) for image in potentially_new_images])
+                if self.stop_event.is_set(): return
+                self.save_items()
+                if self.stop_event.is_set(): return
+                self.build_image_tree()
+                if self.stop_event.is_set(): return
+                self.run_task(process_name="finding duplicate images", function=self.find_duplicates, args=[(image, self.old_images | self.new_images, self.new_images) for image in self.new_images.items()])
+                if self.stop_event.is_set(): return
+
+            if len(potentially_new_videos) > 0:    
+                random.shuffle(potentially_new_videos)
+                self.run_task(process_name="Hashing old videos", function=self.hash_video, args=[(video, False) for video in videos1])
+                if self.stop_event.is_set(): return
+                self.run_task(process_name="Hashing new videos", function=self.hash_video, args=[(video, True) for video in potentially_new_videos])
+                if self.stop_event.is_set(): return
+                self.save_items()
+                if self.stop_event.is_set(): return
+                self.build_video_tree()
+                if self.stop_event.is_set(): return
+                self.run_task(process_name="finding duplicate videos", function=self.find_duplicates, args=[(video, self.old_videos | self.new_videos, self.new_videos) for video in self.new_videos.items()])
+                if self.stop_event.is_set(): return
             
         files_unverified = self.verify(files2)
         if len(files_unverified) == 0:
@@ -493,7 +532,8 @@ class HashStorage:
       
     def get_image_hash(self, image_path):
         if os.path.getsize(image_path) == 0:
-            return [None, 1, 0, False, None]
+            im = Image.new(mode="RGB", size=(200, 200))
+            return [imagehash.phash(im), 1, 0, False, None]
         # GIF support: If the file is a GIF, hash the first frame only.
         try:
             if image_path.lower().endswith('.gif'):
@@ -525,7 +565,8 @@ class HashStorage:
 
     def get_video_hashes(self, video_path, frame_interval=24, max_hashes=3):
         if os.path.getsize(video_path) == 0:
-            return [None, 1, 0, False, None]
+            im = Image.new(mode="RGB", size=(200, 200))
+            return [imagehash.phash(im), 1, 0, False, None]
         
         #if self.advanced_comparison:
         try:
@@ -579,14 +620,18 @@ class HashStorage:
             if type(item[1][0]) != list: # list means video hashes, else image hash
                 result = self.precheck_same_names(item, is_image=True)
                 if result[3] != 'low-res duplicate':
-                    result = self.search_vptree(self.image_tree, item[0], all_items, new_items)
+                    start2 = time.time()
+                    result = self.search_vptree(self.image_tree, item[0], all_items, new_items, is_images=True)
+                    self.logger.add_time(time.time()-start2, "searching tree")
 
             else:
                 result = self.precheck_same_names(item, is_image=False)
                 if result[3] != 'low-res duplicate': 
+                    start2 = time.time()
                     result = self.search_vptree(self.video_tree, item[0], all_items, new_items, is_images=False)
+                    self.logger.add_time(time.time()-start2, "searching tree")
         
-        self.logger.add_time(time.time()-start, "finding duplicate")
+        self.logger.add_time(time.time()-start, "searching duplicates")
         self.handle_result(result)
         
    
@@ -766,6 +811,7 @@ class HashStorage:
 
 ## TREE ##
     def ar_similarity(self, ar1, ar2):
+        if ar1==ar2: return 1
         similarity = min(ar1, ar2) / max(ar1, ar2)
         return similarity
 
@@ -818,7 +864,7 @@ class HashStorage:
         if self.enable_threading:            
             with ThreadPoolExecutor() as executor:
                 # Submit lazily with as_completed, not all at once
-                futures = {executor.submit(function, *arg): arg for arg in args}
+                futures = {executor.submit(function, *(arg if isinstance(arg, (tuple, list)) else (arg,))): arg for arg in args}
 
                 for i, future in enumerate(as_completed(futures)):
                     self.tracker["i"] = i
@@ -839,11 +885,12 @@ class HashStorage:
                         self.tracker["time remaining"] = (time.time() - start) * (self.tracker["total"] - i) / (i + 1)
             
         else:
-            start = time.time()
             for i, arg in enumerate(args): 
                 self.tracker["i"] = i
                 if self.stop_event.is_set():
                     break
+                if not isinstance(arg, (tuple, list)):
+                    arg = (arg,)
                 results.append(function(*arg))
                 if i % 10 == 0:
                         self.tracker["progress"] = i / self.tracker["total"]
@@ -854,6 +901,7 @@ class HashStorage:
                 self.save_items()
             return
         
+        self.logger.add_time(time.time()-start, process_name)
         return results
 
     def is_in_path(self, file_path, base_path):
