@@ -104,6 +104,7 @@ def show_comparison_dialog(window, paths, logger, stop_event, window_event, high
 
         # If the page hasn't been loaded, start loading it
         if not loaded_pages[target_page]:
+            load_page_images(target_page)
             root.after(200, lambda: prev_next(value))  # Retry once loading starts
             return
 

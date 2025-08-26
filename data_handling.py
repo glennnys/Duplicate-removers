@@ -26,7 +26,7 @@ class HashHandler:
         self.stop_event = stop_event
         self.enable_threading=enable_threading
         self.threshold = threshold
-        self.adv_threshold = threshold/2
+        self.adv_threshold = threshold*0.4
         self.extract_meta = extract_meta
 
         self.image_extensions = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]
@@ -122,23 +122,23 @@ class HashHandler:
                             if path.startswith(self.existing_folder):
                                 if isinstance(hash_str, list):
                                     hash_val = [imagehash.hex_to_hash(hash_st) for hash_st in hash_str]
-                                    item = ds.Item(path, get_video_hashes, video_hamming_distance, adv_comp_func=video_partial, update_result_func=self.item_update, item_hash=hash_val)
+                                    item = ds.Item(path, get_video_hashes, video_hamming_distance, adv_comp_func=video_partial, update_result_func=self.item_update, end_func=self.handle_result, item_hash=hash_val)
                                     self.old_videos.append(item)
 
                                 else:
                                     hash_val = imagehash.hex_to_hash(hash_str)
-                                    item = ds.Item(path, get_image_hash, image_hamming_distance, adv_comp_func=image_partial, update_result_func=self.item_update, item_hash=hash_val)
+                                    item = ds.Item(path, get_image_hash, image_hamming_distance, adv_comp_func=image_partial, update_result_func=self.item_update, end_func=self.handle_result, item_hash=hash_val)
                                     self.old_images.append(item)
 
                             elif path in new_files:
                                 if isinstance(hash_str, list):
                                     hash_val = [imagehash.hex_to_hash(hash_st) for hash_st in hash_str]
-                                    item = ds.Item(path, get_video_hashes, video_hamming_distance, adv_comp_func=video_partial, update_result_func=self.item_update, item_hash=hash_val)
+                                    item = ds.Item(path, get_video_hashes, video_hamming_distance, adv_comp_func=video_partial, update_result_func=self.item_update, end_func=self.handle_result, item_hash=hash_val)
                                     self.new_videos.append(item)
                                     
                                 else:
                                     hash_val = imagehash.hex_to_hash(hash_str)
-                                    item = ds.Item(path, get_image_hash, image_hamming_distance, adv_comp_func=image_partial, update_result_func=self.item_update, item_hash=hash_val)
+                                    item = ds.Item(path, get_image_hash, image_hamming_distance, adv_comp_func=image_partial, update_result_func=self.item_update, end_func=self.handle_result, item_hash=hash_val)
                                     self.new_images.append(item)
 
                     except Exception as e:
@@ -177,10 +177,7 @@ class HashHandler:
             for idx, new_file in enumerate(files):
                 file_range = files[:idx] + files[idx+1:]
                 if not only_compare_to_originals: file_range += original_size_dict[size]
-                if file_range != []:
-                    args.append((new_file, file_range))
-                else:
-                    new_files_for_deeper_check.append(new_file[0])
+                args.append((new_file, file_range))
 
         def fast_compare(file1, file2):
             if file1[0] == file2[0]:
@@ -209,20 +206,21 @@ class HashHandler:
             return False
 
         def check_file(new_file, file_range):
-                if self.check_if_previously_processed(new_file[0]): return
+                if self.check_if_previously_processed(new_file[0]): 
+                    return
                 for other_file in file_range:
                     if self.stop_event.is_set():
                         return None
                     if fast_compare(new_file, other_file):
                         if bytewise_compare_files(new_file[0], other_file[0]):
-                            item = ds.Item(new_file[0], None, None, None, None)
+                            item = ds.Item(new_file[0], None, None, None, None, None)
                             item.result = "low-res duplicate"
                             item.relevant_dupes.append(other_file[0])
                             self.handle_result(item)
                             return
                 
                 if simple_check:
-                    item = ds.Item(new_file[0], None, None, None, None)
+                    item = ds.Item(new_file[0], None, None, None, None, None)
                     item.result = "new"
                     self.handle_result(item)
 
@@ -254,6 +252,8 @@ class HashHandler:
             if item.dist_func(item.hash, match.hash) < self.real_threshold and item.size <= match.size:
                 item.finished = True
                 item.result = "low-res duplicate"
+                item.relevant_dupes.append(match.path)
+
                 break           
 
     def check_duplicates(self, files1, files2):
@@ -313,7 +313,7 @@ class HashHandler:
         if self.stop_event.is_set(): return
         for result in results:
             if result is not None:
-                item = ds.Item(result, None, None, None, None)
+                item = ds.Item(result, None, None, None, None, None)
                 item.result = ""
                 self.handle_result(item)
 
@@ -344,6 +344,7 @@ class HashHandler:
             start = time.time()
             self.tracker["progress"] = 0
             self.tracker["process"] = "loading saved hashes"
+            self.tracker["total"] = None
             self.tracker["time remaining"] = 0
             self.load_items(potentially_new_images + potentially_new_videos)
             if self.stop_event.is_set(): return
@@ -355,6 +356,10 @@ class HashHandler:
                 if self.stop_event.is_set(): return
                 self.run_task(process_name="Hashing new images", function=self.hash_image, args=[(image, True) for image in potentially_new_images])
                 if self.stop_event.is_set(): return
+                self.tracker["progress"] = 0
+                self.tracker["process"] = "saving item hashes"
+                self.tracker["total"] = None
+                self.tracker["time remaining"] = 0
                 self.save_items()
                 name_indexes = self.get_names_index(self.old_images.items)
                 self.run_task(process_name="prechecking image names", function=self.precheck_name, args=[(item, name_indexes) for item in self.new_images], allow_saving=False)
@@ -364,8 +369,6 @@ class HashHandler:
                 if self.stop_event.is_set(): return
                 self.run_task(process_name="finding duplicate images", function=self.storage_unit.search_vptree, args=[(image, tree) for image in self.new_images])
                 if self.stop_event.is_set(): return
-                self.run_task(process_name="copying, moving or removing processed images", function=self.handle_result, args=self.new_images.items)
-                if self.stop_event.is_set(): return
                 self.checked_nodes += self.storage_unit.checked_nodes
 
             if len(potentially_new_videos) > 0:    
@@ -374,6 +377,10 @@ class HashHandler:
                 if self.stop_event.is_set(): return
                 self.run_task(process_name="Hashing new videos", function=self.hash_video, args=[(video, True) for video in potentially_new_videos])
                 if self.stop_event.is_set(): return
+                self.tracker["progress"] = 0
+                self.tracker["process"] = "saving item hashes"
+                self.tracker["total"] = None
+                self.tracker["time remaining"] = 0
                 self.save_items()
                 name_indexes = self.get_names_index(self.old_videos)
                 self.run_task(process_name="prechecking video names", function=self.precheck_name, args=[(item, name_indexes) for item in self.new_videos], allow_saving=False)
@@ -383,14 +390,14 @@ class HashHandler:
                 if self.stop_event.is_set(): return
                 self.run_task(process_name="finding duplicate videos", function=self.storage_unit.search_vptree, args=[(video, tree) for video in self.new_videos])
                 if self.stop_event.is_set(): return
-                self.run_task(process_name="copying, moving or removing processed videos", function=self.handle_result, args=self.new_videos.items)
-                if self.stop_event.is_set(): return
                 self.checked_nodes += self.storage_unit.checked_nodes
             
         files_unverified = self.verify(files2)
         if len(files_unverified) == 0:
             self.tracker["progress"] = 0
             self.tracker["process"] = "Verified all files"
+            self.tracker["total"] = None
+            self.tracker["time remaining"] = 0
             print("All files verified")
             self.tracker["total"] = None
             time.sleep(2)
@@ -398,6 +405,7 @@ class HashHandler:
             self.tracker["progress"] = 0
             self.tracker["process"] = "Unable to verify all files, check terminal for problems"
             self.tracker["total"] = None
+            self.tracker["time remaining"] = 0
             print(f"{files_unverified}. These files were unable to be verified for some reason or another")
             time.sleep(5)
         if self.stop_event.is_set(): return
@@ -427,11 +435,12 @@ class HashHandler:
         self.logger.add_time(time.time()-start, "Copy item")
         
         # to open window for comparison
+        if len(item.relevant_dupes) == 0: return
         if self.duplicate_handling != "3" and item.result == "high-res duplicate" and dest_file is not None:
-            self.higher_res_to_compare.append((item.path, item.relevant_dupes[0]))
+            self.higher_res_to_compare.append((item.relevant_dupes[0], item.path))
 
         if destination == self.dupe_dest and self.duplicate_handling == "2":
-            self.duplicates_to_compare.append((item.path, item.relevant_dupes[0])) 
+            self.duplicates_to_compare.append((item.relevant_dupes[0], item.path)) 
 
 
 ##### PSEUDO-HELPERS #####
@@ -442,11 +451,11 @@ class HashHandler:
     
         if is_new:
             if image not in self.new_images:
-                item = ds.Item(image, get_image_hash, image_hamming_distance, adv_comp_func=image_partial, update_result_func=self.item_update)
+                item = ds.Item(image, get_image_hash, image_hamming_distance, adv_comp_func=image_partial, end_func=self.handle_result, update_result_func=self.item_update)
                 self.new_images.append(item)
         else:
             if image not in self.old_images:
-                item = ds.Item(image, get_image_hash, image_hamming_distance, adv_comp_func=image_partial, update_result_func=self.item_update)
+                item = ds.Item(image, get_image_hash, image_hamming_distance, adv_comp_func=image_partial, end_func=self.handle_result, update_result_func=self.item_update)
                 self.old_images.append(item)
 
         self.logger.add_time(time.time()-start, "Hash image")
@@ -458,12 +467,12 @@ class HashHandler:
 
         if is_new:
             if video not in self.new_videos:
-                item = ds.Item(video, get_video_hashes, video_hamming_distance, adv_comp_func=video_partial, update_result_func=self.item_update)
+                item = ds.Item(video, get_video_hashes, video_hamming_distance, adv_comp_func=video_partial, end_func=self.handle_result, update_result_func=self.item_update)
                 self.new_videos.append(item)
 
         else:
             if video not in self.old_videos:  
-                item = ds.Item(video, get_video_hashes, video_hamming_distance, adv_comp_func=video_partial, update_result_func=self.item_update)
+                item = ds.Item(video, get_video_hashes, video_hamming_distance, adv_comp_func=video_partial, end_func=self.handle_result, update_result_func=self.item_update)
                 self.old_videos.append(item)
 
         self.logger.add_time(time.time()-start, "Hash video")      

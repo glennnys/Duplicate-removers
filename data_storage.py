@@ -6,7 +6,7 @@ import threading
 VPTreeNode = namedtuple('VPTreeNode', ['point', 'threshold', 'left', 'right'])
 
 class Item:
-    def __init__(self, path, hash_func, dist_func, adv_comp_func, update_result_func, item_hash=None):
+    def __init__(self, path, hash_func, dist_func, adv_comp_func, update_result_func, end_func, item_hash=None):
         self.path = path
         self.name = os.path.basename(path)
         self.size = os.path.getsize(path)
@@ -22,6 +22,7 @@ class Item:
         self.dist_func = dist_func
         self.adv_comp_func = adv_comp_func
         self.update_result_func = update_result_func
+        self.end_func = end_func
 
     def same_item(self, other) -> bool:
         return isinstance(other, Item) and self.path == other.path
@@ -155,7 +156,11 @@ class DataStorage:
         )
 
 
-    def search_vptree(self, item: Item, tree: VPTreeNode): 
+    def search_vptree(self, item: Item, tree: VPTreeNode):
+        self.__search_vptree(item, tree)
+        item.end_func(item)
+
+    def __search_vptree(self, item: Item, tree: VPTreeNode): 
         if tree is None or item.finished: # end condition
             return
         
@@ -178,23 +183,23 @@ class DataStorage:
         if go_left and go_right:
 
             if d < tree.threshold:
-                self.search_vptree(item, tree.left)
+                self.__search_vptree(item, tree.left)
                 if item.finished: return
-                self.search_vptree(item, tree.right)
+                self.__search_vptree(item, tree.right)
                 if item.finished: return
 
             else:
-                self.search_vptree(item, tree.right)
+                self.__search_vptree(item, tree.right)
                 if item.finished: return
-                self.search_vptree(item, tree.left)
+                self.__search_vptree(item, tree.left)
                 if item.finished: return
 
         elif go_left:
-            self.search_vptree(item, tree.left)
+            self.__search_vptree(item, tree.left)
             if item.finished: return
 
         elif go_right:
-            self.search_vptree(item, tree.right)
+            self.__search_vptree(item, tree.right)
             if item.finished: return
 
         return    
