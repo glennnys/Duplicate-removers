@@ -12,7 +12,7 @@ from tkinter import filedialog
 from tkinter import messagebox
 from tkinter.font import Font
 import sv_ttk
-import storage_class as fs
+import data_handling as dh
 import platform
 import cv2
 import json
@@ -518,9 +518,6 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, dupl
     files1 = []
     files2 = []
 
-    image_extensions = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]
-    video_extensions = [".mp4", ".mov", ".avi", ".mkv", ".m4v"]
-
     tracker["progress"] = 0
     tracker["process"] = "Preparing"
     tracker["total"] = 0
@@ -528,6 +525,8 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, dupl
     seen_hashes.set_destination_folders(folder1_path, folder2_path, folder3_path, data_handling, duplicate_handling, json_handling)
     seen_hashes.set_logger(logger)
     seen_hashes.set_tracker(tracker)
+
+    start = time.time()
 
     # if folder1_path is None, only compare files in folder2_path
     if folder1_path is not None:
@@ -543,9 +542,11 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, dupl
             files2.append(path)
 
     # Separate images and videos from other files for folder 1
-    exclude = image_extensions if type_select_var.get() == "3" else video_extensions if type_select_var.get() == "2" else []
+    exclude = seen_hashes.image_extensions if type_select_var.get() == "3" else seen_hashes.video_extensions if type_select_var.get() == "2" else []
     files1 = [file for file in files1 if os.path.splitext(file)[1].lower() not in exclude]
     files2 = [file for file in files2 if os.path.splitext(file)[1].lower() not in exclude]
+
+    logger.add_time(time.time()-start, "Finding files")
 
     seen_hashes.check_duplicates(files1, files2)
     if stop_event.is_set(): return
@@ -556,7 +557,7 @@ def process_folder(folder1_path, folder2_path, folder3_path, data_handling, dupl
     tracker["progress"] = 0
     tracker["process"] = "Finished finding duplicates, opening selection window"
     tracker["total"] = None
-
+    
     if seen_hashes.checked_nodes>0:
         print(f"Checked {seen_hashes.checked_nodes} nodes compared to lazily comparing everything {len(files1) * len(files2)} times. A {(len(files1) * len(files2))/seen_hashes.checked_nodes:.1f}x speed up.")
     print(f"{len(seen_hashes.higher_res_to_compare)} images or videos have a higher resolution than their pre-existing counterpart")
@@ -603,10 +604,14 @@ def on_closing(only_stop_threads=False):
     else:
         print("current time allocations: ", seen_hashes.logger.get_time(sort="9"))
         # re-enable all buttons
+        cancel_button.config(DISABLED)
         button1.config(state=NORMAL)
         button2.config(state=NORMAL)
         button3.config(state=NORMAL)
         button4.config(state=NORMAL)
+        clear_button1.config(state=NORMAL)
+        clear_button2.config(state=NORMAL)
+        clear_button3.config(state=NORMAL)
         enable_threads_button.config(state=NORMAL)
         enable_meta_button.config(state=NORMAL)
         threshold_slider.config(state=NORMAL)
@@ -861,10 +866,14 @@ def start_process():
 
     progress_frame.pack(fill=X, expand=True)
     # disable all buttons
+    cancel_button.config(state=NORMAL)
     button1.config(state=DISABLED)
     button2.config(state=DISABLED)
     button3.config(state=DISABLED)
     button4.config(state=DISABLED)
+    clear_button1.config(state=DISABLED)
+    clear_button2.config(state=DISABLED)
+    clear_button3.config(state=DISABLED)
     enable_threads_button.config(state=DISABLED)
     enable_meta_button.config(state=DISABLED)
     threshold_slider.config(state=DISABLED)
@@ -874,7 +883,7 @@ def start_process():
     entry2.config(state=DISABLED)
     entry3.config(state=DISABLED)
     
-    seen_hashes = fs.HashStorage(stop_event=stop_event, enable_threading=enable_threads, threshold=threshold, extract_meta=extract_meta)
+    seen_hashes = dh.HashHandler(stop_event=stop_event, enable_threading=enable_threads, threshold=threshold, extract_meta=extract_meta)
     stop_event.clear()
     processing_complete.clear()
     processing_thread = threading.Thread(target=process_folder, args=(folder_path1.get(), folder_path2.get(), folder_path3.get(), data_handling_var.get(), dup_select_var.get(), delete_jsons_var.get(), stop_event))
@@ -967,6 +976,8 @@ button4.pack(fill=X, expand=True, side=LEFT)
 
 cancel_button = Button(buttons_frame, text="Cancel", font=big_font, command=lambda: on_closing(only_stop_threads=True))
 cancel_button.pack(fill=X, expand=True, side=LEFT)
+
+cancel_button.config(state=DISABLED)
 
 def toggle_threads():
     global enable_threads
