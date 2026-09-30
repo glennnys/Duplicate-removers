@@ -694,7 +694,11 @@ def on_folder2_selected(path):
     for root, _, file_names in os.walk(path):
         for file in file_names:
             files.append(os.path.join(root, file))
-    total_size = sum(os.path.getsize(file) for file in files)
+    try:
+        total_size = sum(os.path.getsize(file) for file in files)
+    except Exception as e:
+        print(f"Error calculating total size: {e}")
+        total_size = 0
     readable_size = human_readable_size(total_size)
 
     on_folder_selected()

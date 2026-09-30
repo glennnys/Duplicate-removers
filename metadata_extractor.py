@@ -4,10 +4,7 @@ import pillow_heif
 import piexif
 import json
 import datetime
-import pywintypes
-import win32file
-import win32con
-from mutagen.mp4 import MP4
+# from mutagen.mp4 import MP4
 import re
 import datetime
 import subprocess
@@ -149,19 +146,26 @@ def process_no_meta(file_path, json_data, logger, file=None): # simply set the c
     creation_time = json_data.get("Creation Time", None)
     creation_time = datetime.datetime.strptime(creation_time, "%Y:%m:%d %H:%M:%S") if creation_time else None
 
-    win_filetime = pywintypes.Time(creation_time)
-    handle = win32file.CreateFile(
-        file_path,
-        win32con.GENERIC_WRITE,
-        win32con.FILE_SHARE_WRITE,
-        None,
-        win32con.OPEN_EXISTING,
-        0,
-        None
-    )
-    current_times = win32file.GetFileTime(handle)
-    win32file.SetFileTime(handle, win_filetime, current_times[1], current_times[2])
-    handle.close()
+    if os.name == "nt":
+        win_filetime = pywintypes.Time(creation_time)
+        handle = win32file.CreateFile(
+            file_path,
+            win32con.GENERIC_WRITE,
+            win32con.FILE_SHARE_WRITE,
+            None,
+            win32con.OPEN_EXISTING,
+            0,
+            None
+        )
+        try:
+            current_times = win32file.GetFileTime(handle)
+            win32file.SetFileTime(handle, win_filetime, current_times[1], current_times[2])
+        finally:
+            handle.close()
+    else:
+        file_time = creation_time.timestamp()
+        os.utime(file_path, (file_time, file_time))
+        
     logger.add_time(time.time()-start, "Insert metadata")
 
 
@@ -198,6 +202,7 @@ def remove_suffix(filepath):
     
 
 def process_file(file_path, original_path, jsons, logger, file=None, remove_jsons=False):
+    return
     potential_names = [original_path, remove_suffix(original_path)]
 
     first_existing = next((jsons[name] for name in potential_names if os.path.abspath(name) in jsons), None)
